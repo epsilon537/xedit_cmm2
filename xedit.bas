@@ -3,10 +3,29 @@ OPTION DEFAULT NONE
 OPTION BASE 0
 OPTION CONSOLE SCREEN
 
+'-->User Configurable Settings:
+'-----------------------------
+CONST FG_COLOR% = RGB(WHITE)
+CONST FG_COLOR2% = RGB(CYAN)
+CONST BG_COLOR% = RGB(0,0,128)
+CONST BG_COLOR2% = RGB(64, 64, 255)
+CONST KEYB_REPEAT_FIRST% = 300
+CONST KEYB_REPEAT_REST% = 50
+
+'Set to 1 to make the search function case sensitive
+CONST SEARCH_IS_CASE_SENSITIVE% = 0
+CONST TAB_WIDTH% = 2
+'Set to 1 to try and restore previous context (open files and cursor positions) when open XEdit.
+CONST RESTORE_PREV_SESSION_CTXT% = 1
+CONST CTXT_FILE_PATH$ = "\.xedit.ctxt"
+
+'<--User Configurable Settings
+'-----------------------------
+
 MODE 1, 8
 FONT 1, 1
 
-CONST VERSION$ = "0.1"
+CONST VERSION$ = "0.2"
 
 '--> Key Codes. Press Alt-K in the editor to see the keycode corresponding to a keypress. Combos with Ctrl, Shift and Alt are supported.
 'No distinction is made between Left and Right Shift/Alt/Ctrl.
@@ -56,6 +75,7 @@ CONST KEY_SHFT_CRSR_D% = 1185
 CONST KEY_SHFT_CRSR_L% = 1154
 CONST KEY_SHFT_CRSR_R% = 1187
 
+CONST KEY_ALT_F% = 614
 CONST KEY_ALT_K% = 619
 CONST KEY_ALT_L% = 620
 CONST KEY_ALT_S% = 627
@@ -69,6 +89,7 @@ CONST TOGGLE_ACTIVE_WINDOW_KEY% = KEY_CTRL_O%
 CONST TOGGLE_INS_OVR_MODE_KEY% = KEY_INS%
 CONST TOGGLE_BUFFER_KEY% = KEY_F4%
 CONST LOAD_INTO_CURRENT_BUF_KEY% = KEY_F3%
+CONST CLOSE_BUFFER_KEY% = KEY_F12%
 CONST CRSR_UP_KEY% = KEY_UP_ARROW%
 CONST CRSR_DOWN_KEY% = KEY_DOWN_ARROW%
 CONST CRSR_LEFT_KEY% = KEY_LEFT_ARROW%
@@ -96,23 +117,24 @@ CONST CUT_KEY% = KEY_CTRL_X%
 CONST COPY_KEY% = KEY_CTRL_Y%
 CONST PASTE_KEY% = KEY_CTRL_V%
 CONST FIND_KEY% = KEY_CTRL_F%
+CONST FIND_NEXT_KEY% = KEY_ALT_F%
 CONST REPLACE_KEY% = KEY_CTRL_R%
 CONST UNDO_KEY% = KEY_CTRL_Z%
 CONST SAVE_KEY% = KEY_F2%
 CONST SAVE_AS_KEY% = KEY_F9%
 CONST HELP_KEY% = KEY_F1%
 CONST SCREENSHOT_KEY% = KEY_ALT_S%
-'<-- Key Bindings
+CONST START_MACRO_REC_KEY% = KEY_F7%
+CONST PLAY_MACRO_KEY% = KEY_F8%
 
-'These should also be user configurable:
-CONST TAB_WIDTH% = 2
-CONST KEYB_REPEAT_FIRST% = 300
-CONST KEYB_REPEAT_REST% = 50
+
+'<-- Key Bindings
 
 CONST MAX_NUM_ROWS% = 14000 'This is the total number of lines available, across all buffers, including clipboard and undo buffer.
 CONST NUM_BUFFERS% = 4 'Two regular buffers, the clipboard and the undo buffer.
 CONST MAX_NUM_WINDOWS% = 2
 CONST MAX_NUM_UNDOS% = 16
+CONST MAX_NUM_MACRO_RECORDINGS% = 100
 CONST CLIPBOARD_BIDX% = 2 'BIDX = Buffer Index
 CONST UNDO_BIDX% = 3
 CONST COL_WIDTH% = MM.INFO(FONTWIDTH)
@@ -123,13 +145,6 @@ CONST FULL_SCREEN_WINDOW_X% = 0
 CONST FULL_SCREEN_WINDOW_Y% = 0
 CONST FULL_SCREEN_WINDOW_W% = MM.HRES
 CONST FULL_SCREEN_WINDOW_H% = MM.VRES - 2*ROW_HEIGHT%
-
-'Should be user configurable:
-CONST FG_COLOR% = RGB(WHITE)
-CONST FG_COLOR2% = RGB(CYAN)
-CONST BG_COLOR% = RGB(0,0,128)
-CONST BG_COLOR2% = RGB(64, 64, 255)
-
 CONST CURSOR_BLINK_PERIOD% = 500
 CONST PROMPTY% = MM.VRES-2*ROW_HEIGHT%
 
@@ -170,6 +185,13 @@ CONST VSPLIT% = 1 'Vertical Split
 CONST HSPLIT% = 2 'Horizontal Split
 CONST NUM_SPLIT_MODES% = 3
 '<--
+
+'--> Macro recording data structures
+DIM macroRecEnabled% = 0
+DIM macroRecord%(MAX_NUM_MACRO_RECORDINGS%-1)
+DIM macroRecordNumEntries% = 0
+
+'<-- Macro recording
 
 '--> Undo data structure
 DIM undoAction%(MAX_NUM_UNDOS%-1) 'See UNDO_* constants
@@ -282,6 +304,7 @@ DIM showKeyCodeAtPrompt% = 0
 DIM keyCounter% = 0
 DIM exitRequested% = 0
 DIM splitMode% = NO_SPLIT%
+DIM strToFind$ = "" 'For the find function.
 
 DIM crsrMode% = CRSR_MODE_INS%  'Insert or overwrite mode
 DIM crsrActiveWidx% = 0 'Active window index.
@@ -337,13 +360,30 @@ drawGenFooter
 initWindow 0, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%, FULL_SCREEN_WINDOW_H%, 0
 drawWindow 0
 
-SUB loadCmdLine
+SUB setupCtxt
+  LOCAL dummy%, bIdx%
+  
   IF MM.CMDLINE$ <> "" THEN
-    LOCAL dummy% = checkAndLoad%(0, MM.CMDLINE$) 'File to edit can be passed in on command line.
+    dummy% = checkAndLoad%(0, MM.CMDLINE$) 'File to edit can be passed in on command line.
     drawWindow 0
+  ELSE
+    IF RESTORE_PREV_SESSION_CTXT% THEN
+      restoreSessionCtxt
+      IF bufFilename$(0) <> "" THEN
+        dummy% = checkAndLoad%(0, bufFilename$(0))
+      ENDIF
+      IF bufFilename$(1) <> "" THEN
+        dummy% = checkAndLoad%(1, bufFilename$(1))
+      ENDIF
+      
+      bIdx% = winBuf%(crsrActiveWidx%)            
+      gotoBufPos bufSavedCrsrRow%(bIdx%), bufSavedCrsrCol%(bIdx%), 0, 1
+  
+      drawWindow 0
+    ENDIF
   ENDIF
 END SUB
-loadCmdLine
+setupCtxt
 
 DIM blinkCursorFlag% = 0
 settick CURSOR_BLINK_PERIOD%, blinkCursorInt, 1
@@ -351,6 +391,10 @@ settick CURSOR_BLINK_PERIOD%, blinkCursorInt, 1
 mainLoop
 
 EndOfProg:
+IF RESTORE_PREV_SESSION_CTXT% THEN
+  saveSessionCtxt
+ENDIF
+
 CLS RGB(BLACK)
 CLEAR
 END
@@ -380,63 +424,137 @@ SUB mainLoop
     NEXT wIdx%
 
     crsrDraw
-  LOOP
+  LOOP  
+END SUB
+
+SUB restoreSessionCtxt
+  LOCAL lin$
+
+  IF DIR$(CTXT_FILE_PATH$) <> "" THEN
+    OPEN CTXT_FILE_PATH$ FOR INPUT AS #1
+    
+    LINE INPUT #1, lin$
+    bufFilename$(0) = lin$
+  
+    LINE INPUT #1, lin$  
+    bufSavedCrsrCol%(0) = VAL(lin$)
+    
+    LINE INPUT #1, lin$
+    bufSavedCrsrRow%(0) = VAL(lin$)
+    
+    LINE INPUT #1, lin$
+    bufFilename$(1) = lin$
+    
+    LINE INPUT #1, lin$
+    bufSavedCrsrCol%(1) = VAL(lin$)
+    
+    LINE INPUT #1, lin$
+    bufSavedCrsrRow%(1) = VAL(lin$)
+
+    LINE INPUT #1, lin$
+    winBuf%(crsrActiveWidx%) = VAL(lin$)
+    
+    'Set up the other one while we're at it.
+    winBuf%(NOT crsrActiveWidx%) = NOT winBuf%(crsrActiveWidx%)
+    
+    CLOSE #1
+  ENDIF
+END SUB
+
+SUB saveSessionCtxt
+  LOCAL bIdx% = winBuf%(crsrActiveWidx%)
+
+  'Save active window's cursor position (the other one is already saved.
+  bufSavedCrsrCol%(bIdx%) = winBufCrsrCol%(crsrActiveWidx%)
+  bufSavedCrsrRow%(bIdx%) = winBufCrsrRow%(crsrActiveWidx%)
+
+  OPEN CTXT_FILE_PATH$ FOR OUTPUT AS #1
+  
+  PRINT #1, bufFilename$(0)
+  PRINT #1, STR$(bufSavedCrsrCol%(0))
+  PRINT #1, STR$(bufSavedCrsrRow%(0))       
+  PRINT #1, bufFilename$(1)
+  PRINT #1, STR$(bufSavedCrsrCol%(1))
+  PRINT #1, STR$(bufSavedCrsrRow%(1))
+  PRINT #1, STR$(winBuf%(crsrActiveWidx%))
+  
+  CLOSE #1
 END SUB
 
 'help popup is prepared on a separate page in a Box, then shown on page 0 using a sprite.
-SUB showHelpPopup
-  LOCAL longestStringLen% = LEN("Home 1x/2x/3x = Go To Start of Line/Page/Buffer")
-  LOCAL numLines% = 21
-  LOCAL boxWidth% = (longestStringLen%+4)*MM.INFO(FONTWIDTH)
-  LOCAL boxHeight% = (numLines%+4)*MM.INFO(FONTHEIGHT)
+SUB showHelpPopup                                                                
+  LOCAL longestStringLen% = LEN("Key Bindings (Ref. Key Bindings section in XEdit.bas to modify):")
+  
+  LOCAL numLines% = 33
+  LOCAL boxWidth% = (longestStringLen%+4)*COL_WIDTH%
+  LOCAL boxHeight% = (numLines%+4)*ROW_HEIGHT%
 
   PAGE WRITE 2
   BOX 0, 0, boxWidth%, boxHeight%, 4, RGB(RED), RGB(WHITE)
   
-  LOCAL x% = 2*MM.INFO(FONTWIDTH)
-  LOCAL y% = 2*MM.INFO(FONTHEIGHT)
+  LOCAL x% = 2*COL_WIDTH%
+  LOCAL y% = 2*ROW_HEIGHT%
 
-  LOCAL title$ = "XEdit Help - Key Bindings";
+  LOCAL title$ = "XEdit Help"
   PRINT @(x%,y%,2) SPACE$((longestStringLen% - LEN(title$))\2) + title$;
-  y% = y% + 2*MM.INFO(FONTHEIGHT)
-                    
-  PRINT @(x%,y%,2) "F1 = Help";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "F2/F9 = Save File/Save File as";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "F3 = Load File";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "F4 = Toggle Buffer";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "F5 = Toggle Window split";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "F10 = Quit";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "Ctrl-O = Toggle Active Window";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "Ctrl-F = Find Prompt/Selection";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "Ctrl-R = Replace Prompt/Selection";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "Ctrl-X/Ctrl-Y/Ctrl-P = Cut/Copy/Paste";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "Ctrl-G = Goto Line";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "INS = Toggle Insert/Overwrite mode";
-  y% = y% + MM.INFO(FONTHEIGHT)
+  y% = y% + 2*ROW_HEIGHT%
+
+  PRINT @(x%,y%,2) "Key Bindings (Ref. Key Bindings section in XEdit.bas to modify):";
+  Y% = Y% + 2*ROW_HEIGHT%                  
+  PRINT @(x%,y%,2) "F1         = Help";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "F2/F9      = Save File/Save File as";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "F3         = Load File";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "F12        = Close File";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "F4         = Toggle Buffer";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "F5         = Toggle Window split";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "F10        = Quit";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Ctrl-O     = Toggle Active Window";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Ctrl-F     = Find Prompt/Selection";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Alt-F      = Find Next";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Ctrl-R     = Replace Prompt/Selection";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Ctrl-X/Y/V = Cut/Copy/Paste";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Ctrl-G     = Goto Line";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "INS        = Toggle Insert/Overwrite mode";
+  Y% = Y% + ROW_HEIGHT%
   PRINT @(x%,y%,2) "Home 1x/2x/3x = Go To Start of Line/Page/Buffer";
-  y% = y% + MM.INFO(FONTHEIGHT)
+  Y% = Y% + ROW_HEIGHT%
   PRINT @(x%,y%,2) "End 1x/2x/3x = Go To End of Line/Page/Buffer";
-  y% = y% + MM.INFO(FONTHEIGHT)
+  Y% = Y% + ROW_HEIGHT%
   PRINT @(x%,y%,2) "Tab/Shift-Tab = Indent/Unindent Line/Selection";
-  y% = y% + MM.INFO(FONTHEIGHT)
+  Y% = Y% + ROW_HEIGHT%
   PRINT @(x%,y%,2) "Shift-Navigation Key = Start/Extend Selection";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "Ctrl-Z = Undo";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "Alt-K = Show Key Code at prompt";
-  y% = y% + MM.INFO(FONTHEIGHT)
-  PRINT @(x%,y%,2) "Alt-S = Screenshot";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Ctrl-Z     = Undo";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "F7         = Start Macro Recording";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "F8         = Stop Macro Recording / Playback recorded macro";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Alt-K      = Show Key Code at prompt";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "Alt-S      = Screenshot";
+
+  Y% = Y% + 2*ROW_HEIGHT%
+  PRINT @(x%,y%,2) "User Configurable Settings (Set at start of XEdit.bas):";
+  Y% = Y% + 2*ROW_HEIGHT%
+  PRINT @(x%,y%,2) "SEARCH_IS_CASE_SENSITIVE%=0/1. Default=0.";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "TAB_WIDTH%=<Num.>. Default=2.";
+  Y% = Y% + ROW_HEIGHT%
+  PRINT @(x%,y%,2) "RESTORE_PREV_SESSION_CTXT%=0/1. Default=1.";
 
   PAGE WRITE 0
 
@@ -772,14 +890,14 @@ FUNCTION promptForAnyKey$(text$)
   LOCAL pressedKey$
   LOCAL latchedTime% = INT(TIMER)
 
-  PRINT @(0,PROMPTY%) text$;
+  PRINT @(0,PROMPTY%) text$ + SPACE$(FULL_SCREEN_WINDOW_W%\COL_WIDTH% - LEN(text$));
   LOCAL crsrPos% = (LEN(text$)+1)*COL_WIDTH%
   LOCAL invert% = 0
 
   emptyInputBuffer
 
   'An overly complex way of getting a blinking cursor at the prompt...
-  DO: 
+  DO 
     pressedKey$ = INKEY$ 
     PRINT @(crsrPos%, PROMPTY%, invert%) " ";
     IF (INT(TIMER) > latchedTime% + CURSOR_BLINK_PERIOD%) THEN
@@ -852,12 +970,12 @@ FUNCTION checkAndLoad%(bIdx%, fileToLoad$)
       EXIT FUNCTION
     ENDIF
     'A new, empty file
-    FOR ii%=0 TO MAX_NUM_ROWS%-1
+    FOR ii%=0 TO bufNumRows%(bIdx%)-1
       freeLine bufLinePtrs%(ii%, bIdx%)
     NEXT ii%
     numRows% = 0
   ELSE 'Existing file:
-    FOR ii%=0 TO MAX_NUM_ROWS%-1
+    FOR ii%=0 TO bufNumRows%(bIdx%)-1
       freeLine bufLinePtrs%(ii%, bIdx%)
     NEXT ii%
     numRows% = loadFile%(fileToLoadl$, bIdx%)
@@ -1093,7 +1211,7 @@ SUB drawGenFooter
   LOCAL headerRight$ = "F1 = Help  "
   
   'Print inverted.
-  PRINT @(headerX%,headerY%,2) headerLeft$ + SPACE$(headerW%/MM.INFO(FONTWIDTH) - LEN(headerLeft$) - LEN(headerRight$)) + headerRight$;
+  PRINT @(headerX%,headerY%,2) headerLeft$ + SPACE$(headerW%\COL_WIDTH% - LEN(headerLeft$) - LEN(headerRight$)) + headerRight$;
 END SUB
 
 'Scroll horizontally to give offset from the left.
@@ -1140,7 +1258,8 @@ SUB exitKeyHandler
 END SUB
 
 SUB toggleScreenSplitKeyHandler
-  LOCAL oob%, ii%
+  LOCAL ii%, bIdx%
+  
   splitMode% = splitMode%+1
 
   IF splitMode% >= NUM_SPLIT_MODES% THEN
@@ -1152,35 +1271,58 @@ SUB toggleScreenSplitKeyHandler
       resizeWindow crsrActiveWidx%, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%, FULL_SCREEN_WINDOW_H%
       resizeWindow 1 - crsrActiveWidx%, 0, 0, 0 ,0
       drawWindow crsrActiveWidx%
+
     CASE VSPLIT%
       crsrOff
       resizeWindow 0, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_H%
       resizeWindow 1, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_H%
-      'Fix cursor if it's out of bounds.
-      oob% = winWinCrsrCol%(crsrActiveWidx%) - winNumCols%(crsrActiveWidx%) + 1
-      IF oob% > 0 THEN
-        crsrLeft oob%
-      ENDIF
+      
+      gotoBufPos winBufCrsrRow%(crsrActiveWidx%), winBufCrsrCol%(crsrActiveWidx%), 0, 1
+      
+      'Temp switch to other window to restore cursor position.
+      toggleActiveWindowKeyHandler
+      bIdx% = winBuf%(crsrActiveWidx%)            
+      gotoBufPos bufSavedCrsrRow%(bIdx%), bufSavedCrsrCol%(bIdx%), 0, 1
+      toggleActiveWindowKeyHandler
+      
       drawWindow 0: drawWindow 1
+
     CASE HSPLIT%
       crsrOff
       resizeWindow 0, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%, FULL_SCREEN_WINDOW_H%\2
       resizeWindow 1, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y% + FULL_SCREEN_WINDOW_H%\2, FULL_SCREEN_WINDOW_W%, FULL_SCREEN_WINDOW_H%\2
-      'Fix cursor if it's out of bounds.
-      oob% = winWinCrsrRow%(crsrActiveWidx%) - winNumRows%(crsrActiveWidx%) + 1
-      IF oob% > 0 THEN
-        crsrUp oob%
-      ENDIF
+
+      gotoBufPos winBufCrsrRow%(crsrActiveWidx%), winBufCrsrCol%(crsrActiveWidx%), 0, 1
+
+      'Temp switch to other window to restore cursor position.
+      toggleActiveWindowKeyHandler
+      bIdx% = winBuf%(crsrActiveWidx%)            
+      gotoBufPos bufSavedCrsrRow%(bIdx%), bufSavedCrsrCol%(bIdx%), 0, 1
+      toggleActiveWindowKeyHandler
+      
       drawWindow 0: drawWindow 1
   END SELECT
 END SUB
 
 SUB toggleActiveWindowKeyHandler
+  LOCAL oob%
+  
   IF splitMode% <> NO_SPLIT% THEN
     crsrActiveWidx% = crsrActiveWidx% + 1
     IF crsrActiveWidx% >= MAX_NUM_WINDOWS% THEN
       crsrActiveWidx% = 0
     ENDIF
+    
+    'Fix cursor if it's out of bounds.
+    'oob% = winWinCrsrRow%(crsrActiveWidx%) - winNumRows%(crsrActiveWidx%) + 1
+    'IF oob% > 0 THEN
+    '  crsrUp oob%
+    'ENDIF
+    '
+    'oob% = winWinCrsrCol%(crsrActiveWidx%) - winNumCols%(crsrActiveWidx%) + 1
+    'IF oob% > 0 THEN
+    '  crsrLeft oob%
+    'ENDIF      
   ENDIF
 
   blinkCursor
@@ -1226,6 +1368,34 @@ SUB loadIntoCurrentBufKeyHandler
       winRequestRedraw%(NOT crsrActiveWidx%) = 1
     ENDIF
   ENDIF
+END SUB
+
+SUB closeBufferKeyHandler
+  LOCAL bIdx% = winBuf%(crsrActiveWidx%)
+  LOCAL ii%
+  
+  IF bufIsModified%(bIdx%) THEN
+    LOCAL yesNo$ = promptForAnyKey$("You have unsaved changes. Discard the changes? (Y/N)")
+    IF UCASE$(yesNo$) <> "Y" THEN
+      EXIT SUB
+     ENDIF
+  ENDIF
+  
+  'A new, empty buffer
+  FOR ii%=0 TO bufNumRows%(bIdx%)-1
+    freeLine bufLinePtrs%(ii%, bIdx%)
+  NEXT ii%
+
+  setupBuffer bIdx%, 0, ""
+  
+  resetWindow crsrActiveWidx%
+  winRequestRedraw%(crsrActiveWidx%) = 1
+  IF winBuf%(0) = winBuf%(1) THEN 'If the other window looks into the same buffer, reset that one too.
+    resetWindow NOT crsrActiveWidx%
+    winRequestRedraw%(NOT crsrActiveWidx%) = 1
+  ENDIF
+  
+  promptMsg "Buffer closed.", 1
 END SUB
 
 SUB crsrRightKeyHandler
@@ -1698,21 +1868,6 @@ SUB editKeyHandler key$
   editKey key$
 END SUB
 
-SUB regUndoEnter
-  undoAction%(undoIdx%) = UNDO_ENTER%
-  undoSelStartRow%(undoIdx%) = winBufCrsrRow%(crsrActiveWidx%)
-  undoSelStartCol%(undoIdx%) = winBufCrsrCol%(crsrActiveWidx%)
-  undoSelEndRow%(undoIdx%) = 0
-  undoSelEndCol%(undoIdx%) = 0
-  undoBufStartRow%(undoIdx%) = -1
-  undoBufNumRows%(undoIdx%) = 0
-END SUB
-
-SUB undoEnter
-  gotoBufPos undoSelStartRow%(undoIdx%), undoSelStartCol%(undoIdx%), 0, 1
-  LOCAL ok% = delete%()
-END SUB
-
 FUNCTION numLeadingSpaces%(s$)
   LOCAL ii%=0
   FOR ii%=0 TO LEN(s$)-1
@@ -1739,6 +1894,7 @@ SUB enterKeyHandler
 
   LOCAL bIdx% = winBuf%(crsrActiveWidx%)
   LOCAL lin$, lin1$, lin2$
+  LOCAL startRow%, startCol%
   LOCAL ok%
   LOCAL crsrRow% = winBufCrsrRow%(crsrActiveWidx%)
 
@@ -1747,10 +1903,12 @@ SUB enterKeyHandler
     EXIT SUB
   ENDIF
 
-  registerForUndo UNDO_ENTER%
+  startRow% = winBufCrsrRow%(crsrActiveWidx%)
+  startCol% = winBufCrsrCol%(crsrActiveWidx%)
 
   rdBufLine(bIdx%, crsrRow%, lin$)
-  LOCAL nls% = numLeadingSpaces%(lin$)
+  LOCAL nls% = MIN(numLeadingSpaces%(lin$), winBufCrsrCol%(crsrActiveWidx%))
+  
   lin1$ = LEFT$(lin$, winBufCrsrCol%(crsrActiveWidx%))
   lin2$ = SPACE$(nls%) + MID$(lin$, 1+winBufCrsrCol%(crsrActiveWidx%))
   IF NOT wrBufLine%(bIdx%, crsrRow%+1, lin2$) THEN 'This one could fail (OOM), so do this first.
@@ -1760,7 +1918,16 @@ SUB enterKeyHandler
   ok% = wrBufLine%(bIdx%, crsrRow%, lin1$)
   crsrDown 1
   home 1  
-  crsrRight nls%              
+  crsrRight nls%
+  
+  'Note that typically we register for undo before applying the action but her
+  'we do it after.
+  winSelectCol%(crsrActiveWidx%) = startCol%
+  winSelectRow%(crsrActiveWidx%) = startRow%
+  registerForUndo UNDO_PASTE% 'Reusing the paster undo action.
+  winSelectCol%(crsrActiveWidx%) = -1
+  winSelectRow%(crsrActiveWidx%) = -1
+
   winRequestRedraw%(crsrActiveWidx%) = 1
   IF winBuf%(0) = winBuf%(1) THEN 'If other window looks into the same buffer, redraw that one too.
     winRequestRedraw%(NOT crsrActiveWidx%) = 1
@@ -2647,14 +2814,22 @@ SUB gotoKeyHandler
   gotoBufPos gotoLine% - 1, winBufCrsrTargetCol%(crsrActiveWidx%), 0, 1 
 END SUB
 
+SUB findNextKeyHandler
+  IF strToFind$="" THEN
+    findKeyHandler
+  ELSE
+    findStrToFind 'Keep searching for the same string.
+  ENDIF
+END SUB
+
 SUB findKeyHandler
   LOCAL bIdx% = winBuf%(crsrActiveWidx%)
-  LOCAL strToFind$ = ""
+  LOCAL selStartRow%, selStartCol%, selEndRow%, selEndCol%
 
+  strToFind$=""
+  
   'If there's a selection, use that as search text. Otherwise prompt for text to search.
   IF selectMode%(crsrActiveWidx%) THEN
-    LOCAL selStartRow%, selStartCol%, selEndRow%, selEndCol%
-
     selectionBoundaries(crsrActiveWidx%, selStartRow%, selStartCol%, selEndRow%, selEndCol%)
 
     IF selStartRow% = selEndRow% THEN
@@ -2671,20 +2846,41 @@ SUB findKeyHandler
     EXIT SUB
   ENDIF
 
+  findStrToFind
+END SUB
+  
+SUB findStrToFind
+  LOCAL bIdx% = winBuf%(crsrActiveWidx%)
   LOCAL row%, col%, linLen%
   LOCAL lin$
   LOCAL key$
   LOCAL direction% = 1
+  LOCAL strToFindAbbr$
+  CONST STR_TO_FIND_ABBR_MAX% = 40
+  
+  IF LEN(strToFind$) > STR_TO_FIND_ABBR_MAX%) THEN
+    strToFindAbbr$ = CHR$(34)+LEFT$(strToFind, STR_TO_FIND_ABBR_MAX%)+"..."+CHR$(34)
+  ELSE
+    strToFindAbbr$ = CHR$(34)+strToFind$+CHR$(34)
+  ENDIF
 
-  promptMsg "Searching...", 1
+  promptMsg "Searching for "+strToFindAbbr$+"...", 1
 
+  IF NOT SEARCH_IS_CASE_SENSITIVE% THEN
+    strToFind$=UCASE$(strToFind$)
+  ENDIF
+  
   row%=winBufCrsrRow%(crsrActiveWidx%)
   col%=winBufCrsrCol%(crsrActiveWidx%)
   DO WHILE 1
     DO WHILE (row%>=0) AND (row% < bufNumRows%(bIdx%))
       rdBufLine(bIdx%, row%, lin$)
       linLen% = LEN(lin$)
-
+      
+      IF NOT SEARCH_IS_CASE_SENSITIVE% THEN
+        lin$=UCASE$(lin$)
+      ENDIF
+      
       IF direction% = 1 THEN
         col% = 0
       ELSE
@@ -2707,7 +2903,7 @@ SUB findKeyHandler
           drawWinContents crsrActiveWidx%
           drawWinHeader crsrActiveWidx%
 
-          key$ = UCASE$(promptForAnyKey$("N=Next/P=Previous/Enter=Done."))
+          key$ = UCASE$(promptForAnyKey$("Find "+strToFindAbbr$+", N=Next/P=Previous/Enter=Done."))
           SELECT CASE key$
             CASE "N"
               direction% = 1
@@ -2717,7 +2913,7 @@ SUB findKeyHandler
               EXIT SUB
           END SELECT
 
-          promptMsg "Searching...", 1
+          promptMsg "Searching for "+strToFindAbbr$+"...", 1
         ENDIF
         col% = col% + direction%
       LOOP
@@ -2730,19 +2926,24 @@ SUB findKeyHandler
         EXIT SUB
       ENDIF
       row% = bufNumRows%(bIdx%)-1
+      endKeyHandler 3
     ELSE
-      IF UCASE$(promptForAnyKey$("END of buffer reached. Wrap around? (Y/N)")) <> "Y" THEN
+      IF UCASE$(promptForAnyKey$("End of buffer reached. Wrap around? (Y/N)")) <> "Y" THEN
         EXIT SUB
       ENDIF
       row% = 0
+      home 3
     ENDIF
-    promptMsg "Searching...", 1
+    
+    promptMsg "Searching for "+strToFindAbbr$+"...", 1
   LOOP
 END SUB
 
 SUB replaceKeyHandler
   LOCAL bIdx% = winBuf%(crsrActiveWidx%)
-  LOCAL strToFind$ = "", replaceWith$ = ""
+  LOCAL strToReplace$ = "", replaceWith$ = ""
+  LOCAL strToReplaceAbbr$
+  CONST STR_TO_REPLACE_ABBR_MAX% = 40
 
   IF selectMode%(crsrActiveWidx%) THEN
     LOCAL selStartRow%, selStartCol%, selEndRow%, selEndCol%
@@ -2750,22 +2951,32 @@ SUB replaceKeyHandler
     selectionBoundaries(crsrActiveWidx%, selStartRow%, selStartCol%, selEndRow%, selEndCol%)
 
     IF selStartRow% = selEndRow% THEN
-      rdBufLine(bIdx%, selStartRow%, strToFind$)
-      strToFind$ = MID$(strToFind$, 1+selStartCol%, selEndCol%-selStartCol%)
+      rdBufLine(bIdx%, selStartRow%, strToReplace$)
+      strToReplace$ = MID$(strToReplace$, 1+selStartCol%, selEndCol%-selStartCol%)
     ENDIF
   ENDIF
 
-  IF strToFind$ = "" THEN
-    strToFind$ = promptForText$("Find String: ")
+  IF strToReplace$ = "" THEN
+    strToReplace$ = promptForText$("Find String: ")
   ENDIF
 
-  IF strToFind$ = "" THEN
+  IF strToReplace$ = "" THEN
     EXIT SUB
+  ENDIF
+
+  IF LEN(strToReplace$) > STR_TO_REPLACE_ABBR_MAX%) THEN
+    strToReplaceAbbr$ = CHR$(34)+LEFT$(strToReplace, STR_TO_REPLACE_ABBR_MAX%)+"..."+CHR$(34)
+  ELSE
+    strToReplaceAbbr$ = CHR$(34)+strToReplace$+CHR$(34)
   ENDIF
 
   replaceWith$ = promptForText$("Replace with: ")
   IF replaceWith$ = "" THEN
     EXIT SUB
+  ENDIF
+
+  IF NOT SEARCH_IS_CASE_SENSITIVE% THEN
+    strToReplace$=UCASE$(strToReplace$)
   ENDIF
 
   LOCAL row%, col%, startRow%, startCol%, linLen%, ok%
@@ -2778,12 +2989,16 @@ SUB replaceKeyHandler
   startRow% = winBufCrsrRow%(crsrActiveWidx%)
   startCol% = winBufCrsrCol%(crsrActiveWidx%)
 
-  promptMsg "Searching...", 1
+  promptMsg "Searching for "+strToReplaceAbbr$+"...", 1
 
   DO WHILE 1
     DO WHILE (row%>=0) AND (row% < bufNumRows%(bIdx%))
       rdBufLine(bIdx%, row%, lin$)
       linLen% = LEN(lin$)
+
+      IF NOT SEARCH_IS_CASE_SENSITIVE% THEN
+        lin$=UCASE$(lin$)
+      ENDIF
 
       col% = 0
       
@@ -2800,10 +3015,10 @@ SUB replaceKeyHandler
           EXIT SUB
         ENDIF
 
-        IF INSTR(1+col%, lin$, strToFind$) = 1+col% THEN
+        IF INSTR(1+col%, lin$, strToReplace$) = 1+col% THEN
           gotoBufPos row%, col%, 0, 1
 
-          winSelectCol%(crsrActiveWidx%) = col% + LEN(strToFind$)
+          winSelectCol%(crsrActiveWidx%) = col% + LEN(strToReplace$)
           winSelectRow%(crsrActiveWidx%) = row%
           winBufCrsrCol%(crsrActiveWidx%) = col% 
           winBufCrsrRow%(crsrActiveWidx%) = row%
@@ -2819,15 +3034,13 @@ SUB replaceKeyHandler
 
           SELECT CASE key$
             CASE "N"
-              promptMsg "Searching...", 1
             CASE "Y","A"
               l$ = LEFT$(lin$, col%)
-              r$ = MID$(lin$, 1+col% + LEN(strToFind$))
+              r$ = MID$(lin$, 1+col% + LEN(strToReplace$))
               IF LEN(l$)+LEN(replaceWith$)+LEN(r$) > 255 THEN
                 promptMsg "Can't replace. Would exceed max. line length.", 1
                 EXIT SUB
               ENDIF
-              promptMsg "Replacing...", 1
               lin$ = l$ + replaceWith$ + r$
               ok% = wrBufLine%(bIdx%, row%, lin$)
               crsrOff
@@ -2836,6 +3049,8 @@ SUB replaceKeyHandler
             CASE ELSE
               EXIT SUB
           END SELECT
+          
+          promptMsg "Searching for "+strToReplaceAbbr$+"...", 1
         ENDIF
         col% = col% + 1
       LOOP
@@ -2847,7 +3062,8 @@ SUB replaceKeyHandler
       IF UCASE$(promptForAnyKey$("END of buffer reached. Wrap around? (Y/N)")) <> "Y" THEN
         EXIT SUB
       ENDIF
-      promptMsg "Searching...", 1
+      promptMsg "Searching for "+strToReplaceAbbr$+"...", 1
+      home 3
     ENDIF
     wrappedAround% = 1
     row% = 0
@@ -2860,8 +3076,6 @@ SUB undoKeyHandler
   SELECT CASE undoAction%(undoIdx%)
     CASE UNDO_DELETE_SELECTION%
       undoDeleteSelection
-    CASE UNDO_ENTER%
-      undoEnter
     CASE UNDO_DELETE%
       undoDelete
     CASE UNDO_EDIT%
@@ -2881,6 +3095,9 @@ SUB undoKeyHandler
   IF undoIdx% < 0 THEN
     undoIdx% = MAX_NUM_UNDOS% - 1
   ENDIF
+
+  winSelectRow%(crsrActiveWidx%) = -1
+  winSelectCol%(crsrActiveWidx%) = -1
 
   promptMsg "Undone.", 1
 END SUB
@@ -3113,6 +3330,37 @@ SUB screenshotKeyHandler
   promptMsg "Screenshot saved.", 1
 END SUB
 
+SUB startMacroRecKeyHandler
+  macroRecEnabled% = 1
+  promptMsg "Macro recording started", 1
+END SUB
+
+SUB playMacroKeyHandler
+  LOCAL ii%=0
+  
+  IF macroRecEnabled% THEN
+    macroRecEnabled% = 0
+    'Remove the last entry which is the stop recording / start playback macro key.
+    macroRecordNumEntries% = macroRecordNumEntries% - 1
+    promptMsg "Macro recording stopped", 1
+    EXIT SUB
+  ENDIF
+
+  IF macroRecordNumEntries% = 0 THEN
+    promptMsg "No macro on record. Record macro before playback.", 1
+    EXIT SUB
+  ENDIF
+  
+  promptMsg "Playing back recorded macro...", 1
+  
+  DO WHILE ii% < macroRecordNumEntries%
+    handleKey macroRecord%(ii%)
+    ii% = ii%+1
+  LOOP
+  
+  promptMsg "Macro playback done.", 1
+END SUB
+
 '<-- End of Key Handler section
 
 '--> Keypress with modifiers and selection logic.
@@ -3148,6 +3396,15 @@ END FUNCTION
 SUB handleKey pressedKey%
   STATIC nConsecHomePresses% = 0, nConsecEndPresses% = 0, nSelectConsecPresses% = 0
 
+  IF macroRecEnabled% THEN
+    macroRecord%(macroRecordNumEntries%) = pressedKey%
+    macroRecordNumEntries% = macroRecordNumEntries% + 1
+    IF macroRecordNumEntries% >= MAX_NUM_MACRO_RECORDINGS% THEN
+      promptMsg "Max. macro record reached. Disabling recording.", 1
+      macroRecEnabled% = 0
+    ENDIF
+  ENDIF
+  
   keyCounter% = keyCounter% + 1
 
   IF showKeyCodeAtPrompt% THEN
@@ -3206,6 +3463,8 @@ SUB handleKey pressedKey%
       toggleBufferKeyHandler
     CASE LOAD_INTO_CURRENT_BUF_KEY%
       loadIntoCurrentBufKeyHandler
+    CASE CLOSE_BUFFER_KEY%
+      closeBufferKeyHandler
     CASE ENTER_KEY%
       enterKeyHandler
     CASE BACKSPACE_KEY%
@@ -3231,6 +3490,8 @@ SUB handleKey pressedKey%
       pasteKeyHandler
     CASE FIND_KEY%
       findKeyHandler
+    CASE FIND_NEXT_KEY%
+      findNextKeyHandler
     CASE REPLACE_KEY%
       replaceKeyHandler
     CASE UNDO_KEY%
@@ -3245,8 +3506,12 @@ SUB handleKey pressedKey%
       helpKeyHandler
     CASE SCREENSHOT_KEY%
       screenshotKeyHandler
+    CASE START_MACRO_REC_KEY%
+      startMacroRecKeyHandler
+    CASE PLAY_MACRO_KEY%
+      playMacroKeyHandler
     CASE ELSE
-      pressedKey% = pressedKey% AND (-1 XOR (1<<KEYCODE_SHFT_BITPOS%))
+      pressedKey% = pressedKey% AND 255
       IF isPrintable%(pressedKey%) THEN
         'This is for the non-ctrl keys, i.e. the edits.
         editKeyHandler CHR$(pressedKey%)
@@ -3305,3 +3570,5 @@ SUB checkKeyAndModifier
     handleKey k% OR m%
   ENDIF
 END SUB
+
+        
