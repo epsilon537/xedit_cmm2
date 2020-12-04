@@ -1,9 +1,25 @@
 XEdit Text Editor for Color Maximite 2 by Epsilon
 -------------------------------------------------
-Current Version: 0.4
+Current Version: 0.5
 
 ChangeLog
 ---------
+0.5:
+- Improved horizontal scrolling speed.
+- More sensible buffer position when toggling window split (F5).
+- Faster vertical scrolling with active selection (shift-crsrUp/Down).
+- Ctrl-K deletes from cursor to End Of Line.
+- Fixed some laggy selection highlighting cases.
+- Added User Configurable variable NUM_BACKUP_FILES specifying how many backup copies to
+  maintain when saving a file. Defaults to 1.
+- Added editor resource utilization pop-up, bound to Alt-R.
+- Add Select-All key binding Ctrl-A.
+- Avoiding unnecessary horizontal scrolling when moving cursor up or down.  
+- Reorganized help page.
+- Fixed corner case where "Paste done." message doesn't appear after completing a past action.
+- Fixed corner case: when undo buffer was full and needed to be cleared (emergency measure),
+  the undo buffer lines weren't returned to the line pool, creating a memory leak.
+
 0.4:
 - Added visual position-in-buffer indicator on right window border.
 - Improved search speed.
@@ -74,49 +90,63 @@ XEdit supports undo, macro recording, MMBasic syntax highlighting as well as the
 complement of editor operations: cut/copy/paste, find/replace, indent/unident selections, 
 insert/overwrite mode, goto line.
 
-To Do's
--------
+To Dos
+------
 - Add support for vegipete's FileDialog.
-- Add Select-All key binding.
-- Maintain backup files when saving.
 - Add scroll current line to center/top/end key bindings.
-- Add resource utilization pop-up.
-- Add kill-to-end-of-line (Ctrl-K) keybinding.
-- Add case senstive search/replace keybindings.
-- Faster horizontal scrolling speed.
+- Add case sensitive search/replace keybindings.
+- Smart, escapable line input, allowing entering commas and double quotes on prompt. 
 - Support copy-to-clipboard from console screen.
-- More sensible buffer position when toggling window split (F5).
-- Faster scrolling with selection.
 
 Key Bindings
 ------------
-F1         = Help
-F2/F9      = Save File/Save File as
-F3         = Load File
-F4         = Toggle Buffer
-F5         = Toggle Window split
-F6         = Show Console Screen in current buffer
-F10        = Exit XEdit
-F11        = Exit XEdit and run program currently in buffer
-Ctrl-O     = Toggle Active Window
-Ctrl-F     = Find Prompt/Selection
-Alt-F      = Reverse-Find Prompt/Selection.
-Ctrl-N     = Find Next
-Ctrl-R     = Replace Prompt/Selection
-Ctrl-X/Y/P = Cut/Copy/Paste
-Ctrl-G     = Goto Line
-INS        = Toggle Insert/Overwrite mode (Ctrl-W in SERIAL_INPUT_COMPAT_MODE)
-Home 1x/2x/3x = Go To Start of Line/Page/Buffer
-End 1x/2x/3x = Go To End of Line/Page/Buffer
+(Ref. Key Bindings section in XEdit.bas to modify)
+
+F1          = Help
+F2/F9       = Save File/Save File as
+F3          = Load File
+F12         = Close File
+F4          = Toggle Buffer
+F5          = Toggle Window split
+F6          = Show Console Screen in current buffer
+F10         = Exit XEdit
+F11         = Exit XEdit and run program currently in buffer
+Ctrl-O      = Toggle Active Window
+Ctrl/Alt-F  = Forward/Reverse Find Prompt or Selection
+Ctrl/Alt-N  = Find Next/Previous
+Ctrl-R      = Replace Prompt or Selection
+Ctrl-X/Y/V  = Cut/Copy/Paste
+Ctrl-K      = Delete from cursor to End Of Line
+Ctrl-G      = Goto Line
+INS         = Toggle Insert/Overwrite mode (Ctrl-W in SERIAL_INPUT_COMPAT_MODE)
+Home 1/2/3x = Go To Start of Line/Page/Buffer
+End 1/2/3x  = Go To End of Line/Page/Buffer
 Tab/Shift-Tab = Indent/Unindent Line/Selection (Tab/Ctrl-B in SERIAL_INPUT_COMPAT_MODE)
-Shift-Navigation Key = Start/Extend Selection 
-                       (Esc toggles selection mode in SERIAL_INPUT_COMPAT_MODE)
-Ctrl-Z     = Undo
-F7         = Start Macro Recording
-F8         = Stop Macro Recording / Playback recorded macro
-Alt-C      = Toggle Syntax Highlighting On/Off (Ctrl-S in SERIAL_INPUT_COMPAT_MODE)
-Alt-K      = Show Key Code at prompt (not supported in SERIAL_INPUT_COMPAT_MODE)
-Alt-S      = Screenshot (not supported in SERIAL_INPUT_COMPAT_MODE)
+Shift-Navigation Key = Start/Extend Selection
+(Esc toggles selection mode in SERIAL_INPUT_COMPAT_MODE)
+Ctrl-A      = Select All
+Ctrl-Z      = Undo
+F7          = Start Macro Recording
+F8          = Stop Macro Recording / Playback recorded macro
+Alt-C       = Toggle Syntax Highlighting On/Off (Ctrl-S in SERIAL_INPUT_COMPAT_MODE)
+Alt-K       = Show Key Code at prompt
+Alt-R       = Show XEdit Resource Utilization
+Alt-S       = Screenshot
+
+Navigation Keys: Cursor Up/Down/Left/Right, PgUp/Down, Home/End.
+
+User Configurable Settings 
+--------------------------
+(Set at start of XEdit.bas)
+
+SEARCH_IS_CASE_SENSITIVE%=0/1      Default=0
+TAB_WIDTH%=<Num.>                  Default=2
+RESTORE_PREV_SESSION_CTXT%=0/1     Default=1
+FG/KEYWORD/STRING/COMMENT/BG_COLOR%
+DISABLE_CONFIRMATION_PROMPTS%=0/1  Default=0
+NUM_BACKUP_FILES%=<Num.>           Default=1
+SERIAL_INPUT_COMPAT_MODE%=0/1      Default=0
+(Alt-based key bindings N/A in SERIAL_INPUT_COMPAT_MODE)
 
 Limitations
 -----------

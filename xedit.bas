@@ -63,6 +63,9 @@ CONST DISABLE_CONFIRMATION_PROMPTS% = 0
 'In particular, selection mode is toggled using the Esc key. See help screen for details.
 CONST SERIAL_INPUT_COMPAT_MODE% = 0
 
+'Set to the number of backup copies you would like to maintain when saving a file.
+CONST NUM_BACKUP_FILES% = 1
+
 '<--User Configurable Settings
 '-----------------------------
 IF MM.INFO(MODE) = 1.8 THEN  
@@ -76,7 +79,7 @@ ENDIF
 
 FONT 1, 1
 
-CONST VERSION$ = "0.4"
+CONST VERSION$ = "0.5"
 
 IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   'Key code mode:
@@ -108,9 +111,11 @@ IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   CONST KEY_F10% = 154
   CONST KEY_F11% = 155
   CONST KEY_F12% = 156
-  
+
+  CONST KEY_CTRL_A% = 257
   CONST KEY_CTRL_F% = 262
   CONST KEY_CTRL_G% = 263
+  CONST KEY_CTRL_K% = 267
   CONST KEY_CTRL_Z% = 282
   CONST KEY_CTRL_SPC% = 288
   CONST KEY_CTRL_N% = 270
@@ -135,6 +140,7 @@ IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   CONST KEY_ALT_K% = 619
   CONST KEY_ALT_L% = 620
   CONST KEY_ALT_N% = 622 
+  CONST KEY_ALT_R% = 626
   CONST KEY_ALT_S% = 627
   CONST KEY_SHFT_TAB% = 1033
 ELSE
@@ -153,6 +159,7 @@ ELSE
   CONST KEY_ALT_K% = -1
   CONST KEY_ALT_L% = -1
   CONST KEY_ALT_N% = -1
+  CONST KEY_ALT_R% = -1
   CONST KEY_ALT_S% = -1
   CONST KEY_SHFT_TAB% = -1
 
@@ -184,9 +191,11 @@ ELSE
   CONST KEY_F11% = 155
   CONST KEY_F12% = 156
 
+  CONST KEY_CTRL_A% = 1  
   CONST KEY_CTRL_B% = 2  
   CONST KEY_CTRL_F% = 6
   CONST KEY_CTRL_G% = 7
+  CONST KEY_CTRL_K% = 11
   CONST KEY_CTRL_Z% = 26
   CONST KEY_CTRL_N% = 14
   CONST KEY_CTRL_O% = 15
@@ -264,6 +273,9 @@ IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
 ELSE
   CONST TOGGLE_SYN_HL% = KEY_CTRL_S%
 ENDIF
+CONST KILL_TO_EOL_KEY% = KEY_CTRL_K%
+CONST RESOURCE_UTIL_KEY% = KEY_ALT_R%
+CONST SELECT_ALL_KEY% = KEY_CTRL_A%
 '<-- Key Bindings
 
 CONST MAX_NUM_ROWS% = 14000 'This is the total number of lines available, across all buffers, including clipboard and undo buffer.
@@ -284,7 +296,12 @@ CONST FULL_SCREEN_WINDOW_H% = MM.VRES - 2*ROW_HEIGHT%
 CONST CURSOR_BLINK_PERIOD% = 500
 CONST PROMPTY% = MM.VRES-2*ROW_HEIGHT%
 CONST SLIDER_WIDTH% = 4
+
 CONST DOUBLE_QUOTE$ = CHR$(34)
+CONST CRSR_RIGHT_INKEY$ = CHR$(131)
+CONST CRSR_LEFT_INKEY$ = CHR$(130)
+CONST RIGHT_ARROW$ = CHR$(148)
+CONST LEFT_ARROW$ = CHR$(149)
 
 '--> Undo operation codes:
 CONST UNDO_DELETE_SELECTION% = 1
@@ -328,9 +345,12 @@ CONST NO_REDRAW% = 0
 CONST FULL_REDRAW% = 1
 CONST SCROLL_UP% = 2
 CONST SCROLL_DOWN% = 3
+CONST SCROLL_LEFT% = 4
+CONST SCROLL_RIGHT% = 5
 '<--
 
 DIM winContentScrollDownStartRow%, winContentScrollUpStartRow%
+DIM winContentScrollUpEndRow%
 
 '--> Macro recording data structures
 DIM macroRecEnabled% = 0
@@ -479,7 +499,7 @@ KEYWORD_LIST_DATA:
   DATA "LEN","LEFT","RIGHT","EOF","MAX","MIN","COLOR","UCASE","LCASE","LCOMPARE","HIDE"
   DATA "SAFE", "MM", "INFO", "DEVICE", "ERRNO", "ERRMSG", "HRES", "VRES", "PEEK", "MOD"
   DATA "INTEGER", "STRING", "FLOAT", "OFF", "OUTPUT", "RANDOM"
-  DATA "INCLUDE", "TO", "LENGTH", "UNTIL","IR","LS"
+  DATA "INCLUDE", "TO", "AS", "LENGTH", "UNTIL","IR","LS"
   DATA "ABS", "ACOS", "ASC", "ASIN", "ATAN2", "ATN","BAUDRATE","BIN"
   DATA "BIN2STR", "BOUND", "CINT", "CLASSIC", "COS","CWD"
   DATA "DATETIME", "DAY", "DEG", "DIR", "DISTANCE", "EPPOCH", "EVAL", "EXP"
@@ -519,8 +539,8 @@ CONST PARSE_COLOR_STRING% = 4
 CONST PARSE_COLOR_COMMENT% = 5
 CONST PARSER_NUM_KEYWORDS% = 6
 CONST PARSER_FRAG_START% = 7
-CONST PARSER_START_COL% = 8
-CONST PARSER_END_COL% = 9
+CONST PARSER_START_COL% = 8 'One based start column
+CONST PARSER_END_COL% = 9 'One based end column
 CONST PARSER_LINE_X% = 10
 CONST PARSER_LINE_Y% = 11
 
@@ -578,11 +598,11 @@ End CSUB
 '  long lineToParseLen = *lineToParse;
 '  long parsePos = parserCSUBCtxt[PARSE_POS];
 '  long parseState = parserCSUBCtxt[PARSE_STATE];
-'  long numCmds = parserCSUBCtxt[PARSER_NUM_KEYWORDS];
+'  long numCmds = parserCSUBCtxt[PARSER_NUM_COMMANDS];
 '  long startCol = parserCSUBCtxt[PARSER_START_COL];
-'  long endCol = parserCSUBCtxt[PARSER_END_COL];
+'  long endCol = parserCSUBCtxt[PARSER_END_COL]; //endCol is one based.
 '  unsigned char *parseWhiteSpaces = cmdList; //First cmd is list of whitespaces.
-'  unsigned char *seek = lineToParse + parsePos;
+'  unsigned char *seek = lineToParse + parsePos; //Seek is one based (rel. to lineToParse), as far as pointers can be one based.
 '  unsigned char *frag, *fragEndp;
 '  unsigned char c;
 '  long ii, jj, fragLen, cmdLen;
@@ -597,14 +617,15 @@ End CSUB
 '    return parserCSUBCtxt[PARSE_COLOR_COMMENT];
 '  }
 '
-'  if (parseState == PARSE_STATE_STRING) {
+' if (parseState == PARSE_STATE_STRING) {
 '    ii = parsePos+1;
 '    while (ii < endCol) {
+'      /*Note that we want to increment ii here also when there's a match.*/
 '      if (lineToParse[ii++] == '\"')
 '        break;
 '    }
 '
-'    if (ii < endCol) { //if not at end of string, figure out the next state
+'    if (ii < endCol) { //if not at end, figure out the next state
 '      c = lineToParse[ii];
 '
 '      if (c=='\'') {
@@ -628,7 +649,7 @@ End CSUB
 '    parserCSUBCtxt[PARSE_POS] = ii;
 '    return parserCSUBCtxt[PARSE_COLOR_STRING];
 '  }
-'
+
 '  //Whitespace or word state.
 '  while (seek <= lineToParse + lineToParseLen) { //Determine next state
 '    c = *seek;
@@ -703,7 +724,7 @@ End CSUB
 '  int x2;
 '  char c = lineToParse[1];
 '
-'  parserCSUBCtxt[PARSE_POS] = 1;
+'  parserCSUBCtxt[PARSE_POS] = 1; /*PARSE_POS is one based string offset.*/
 '
 '  if (c=='\'') {
 '    parserCSUBCtxt[PARSE_STATE] = PARSE_STATE_COMMENT;
@@ -766,9 +787,6 @@ CSUB syntaxHighLight INTEGER, STRING, STRING
 End CSUB
 '<-- CSUBS
 
-'PAGE WRITE 1
-'COLOR FG_COLOR%, BG_COLOR%
-'CLS
 PAGE WRITE 0
 COLOR FG_COLOR%, BG_COLOR%
 CLS
@@ -847,9 +865,13 @@ SUB mainLoop
           CASE FULL_REDRAW%
             drawWinContents wIdx%
           CASE SCROLL_UP%
-            winContentsScrollUp wIdx%, winContentScrollUpStartRow%
+            winContentsScrollUp wIdx%, winContentScrollUpStartRow%, winContentScrollUpEndRow%
           CASE SCROLL_DOWN%
             winContentsScrollDown wIdx%, winContentScrollDownStartRow%
+          CASE SCROLL_LEFT%
+            winContentsScrollLeft wIdx%
+          CASE SCROLL_RIGHT%
+            winContentsScrollRight wIdx%            
         END SELECT
         winRedrawAction%(wIdx%) = NO_REDRAW%
       ENDIF
@@ -940,10 +962,10 @@ SUB saveSessionCtxt
   CLOSE #1
 END SUB
 
-'help popup is prepared on a separate page in a Box, then shown on page 0 using a sprite.
-SUB showHelpPopup                                                                
+'Popup is prepared on a separate page in a Box, then shown on page 0 using blit.
+SUB showKeybindPopup                                                                
   LOCAL longestStringLen% = LEN("Key Bindings (Ref. Key Bindings section in XEdit.bas to modify):")
-  LOCAL numLines% = 40
+  LOCAL numLines% = 37
   LOCAL boxWidth% = (longestStringLen%+4)*COL_WIDTH%
   LOCAL boxHeight% = (numLines%+4)*ROW_HEIGHT%
 
@@ -990,6 +1012,8 @@ SUB showHelpPopup
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "Ctrl-X/Y/V  = Cut/Copy/Paste"
   y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Ctrl-K      = Delete from cursor to End Of Line"
+  y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "Ctrl-G      = Goto Line"
   y% = y% + ROW_HEIGHT%
   IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
@@ -1014,6 +1038,8 @@ SUB showHelpPopup
     TEXT x%, y%, "Esc         = Toggle Selection Mode On/Off"
   ENDIF
   y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Ctrl-A      = Select All"
+  y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "Ctrl-Z      = Undo"
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "F7          = Start Macro Recording"
@@ -1028,25 +1054,14 @@ SUB showHelpPopup
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "Alt-K       = Show Key Code at prompt"
   y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Alt-R       = Show XEdit Resource Utilization."
+  y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "Alt-S       = Screenshot"
   y% = y% + 2*ROW_HEIGHT%
-  'TEXT x%, y%, "Navigation Keys: Cursor Up/Down/Left/Right, PgUp/Down, Home/End"
-  'y% = y% + 2*ROW_HEIGHT%  
-  TEXT x%, y%, "User Configurable Settings (Set at start of XEdit.bas):"
-  y% = y% + 2*ROW_HEIGHT%
-  TEXT x%, y%, "SEARCH_IS_CASE_SENSITIVE%=0/1.     Default=0."
-  y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "TAB_WIDTH%=<Num.>.                 Default=2."
-  y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "RESTORE_PREV_SESSION_CTXT%=0/1.    Default=1."
-  y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "FG/KEYWORD/STRING/COMMENT/BG_COLOR%"
-  y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "DISABLE_CONFIRMATION_PROMPTS%=0/1. Default=0."
-  y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "SERIAL_INPUT_COMPAT_MODE%=0/1.     Default=0."
-  y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "(Alt-based key bindings N/A in SERIAL_INPUT_COMPAT_MODE)"
+  TEXT x%, y%, "Navigation Keys: Cursor Up/Down/Left/Right, PgUp/Down, Home/End"
+  y% = y% + 2*ROW_HEIGHT%  
+  title$ =  "Press "+RIGHT_ARROW$+" to go to the User Config. Settings Help Page."
+  TEXT x%, y%, SPACE$((longestStringLen% - LEN(title$))\2) + title$
 
   'Copy screen to page 1 so we can restore it later.
   PAGE COPY 0 TO 1  
@@ -1056,8 +1071,120 @@ SUB showHelpPopup
   BLIT 0, 0, MM.HRES/2 - boxWidth%/2, MM.VRES/2 - boxHeight%/2, boxWidth%, boxHeight%, 3
 END SUB
 
-SUB removeHelpPopup
+'Popup is prepared on a separate page in a Box, then shown on page 0 using blit.
+SUB showUserCfgPopup
+  LOCAL longestStringLen% = LEN("(Alt-based key bindings N/A in SERIAL_INPUT_COMPAT_MODE)")
+  LOCAL numLines% = 14
+  LOCAL boxWidth% = (longestStringLen%+4)*COL_WIDTH%
+  LOCAL boxHeight% = (numLines%+4)*ROW_HEIGHT%
+
+  PAGE WRITE 3
+  CLS
+  
+  COLOR BG_COLOR%, FG_COLOR2%
+  BOX 0, 0, boxWidth%, boxHeight%, 4, BG_COLOR2%, FG_COLOR2%
+  
+  LOCAL x% = 2*COL_WIDTH%
+  LOCAL y% = 2*ROW_HEIGHT%
+
+  LOCAL title$ = "XEdit Help (continued)"
+  TEXT x%, y%, SPACE$((longestStringLen% - LEN(title$))\2) + title$
+  y% = y% + 2*ROW_HEIGHT%
+
+  TEXT x%, y%, "User Configurable Settings (Set at start of XEdit.bas):"
+  y% = y% + 2*ROW_HEIGHT%
+  TEXT x%, y%, "SEARCH_IS_CASE_SENSITIVE%=0/1      Default=0"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "TAB_WIDTH%=<Num.>                  Default=2"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "RESTORE_PREV_SESSION_CTXT%=0/1     Default=1"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "FG/KEYWORD/STRING/COMMENT/BG_COLOR%"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "DISABLE_CONFIRMATION_PROMPTS%=0/1  Default=0"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "NUM_BACKUP_FILES%=<Num.>           Default=1"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "SERIAL_INPUT_COMPAT_MODE%=0/1      Default=0"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "(Alt-based key bindings N/A in SERIAL_INPUT_COMPAT_MODE)"
+  y% = y% + 2*ROW_HEIGHT%
+
+  title$ = "Press "+LEFT_ARROW$+" to go to the Key Bindings Help Page."
+  TEXT x%, y%, SPACE$((longestStringLen% - LEN(title$))\2) + title$  
+  y% = y% + ROW_HEIGHT%
+
+  'Copy screen to page 1 so we can restore it later.
+  PAGE COPY 0 TO 1  
+  PAGE WRITE 0
+  COLOR FG_COLOR%, BG_COLOR%
+
+  BLIT 0, 0, MM.HRES/2 - boxWidth%/2, MM.VRES/2 - boxHeight%/2, boxWidth%, boxHeight%, 3
+END SUB
+
+SUB removePopup
   PAGE COPY 1 TO 0
+END SUB
+
+'Popup is prepared on a separate page in a Box, then shown on page 0 using a sprite.
+SUB showResUtilPopup                                                                
+  LOCAL longestStringLen% = LEN("Clipboard Buffer Utilization = 12000/12000 (100.00%)")
+  LOCAL numLines% = 7
+  LOCAL boxWidth% = (longestStringLen%+4)*COL_WIDTH%
+  LOCAL boxHeight% = (numLines%+4)*ROW_HEIGHT%
+  LOCAL linePoolUtil% = 0, ii%=0
+
+  'Copy screen to page 1 so we can restore it later.
+  PAGE COPY 0 TO 1  
+  
+  promptMsg "Computing resource utilization...", 1
+
+  LOCAL buf0n% = bufNumRows%(0)
+  LOCAL buf1n% = bufNumRows%(1)
+  LOCAL clpn% = bufNumRows%(CLIPBOARD_BIDX%)
+  LOCAL undon% = bufNumRows%(UNDO_BIDX%)
+
+  LOCAL buf0pct! = 100*buf0n%/MAX_NUM_ROWS%
+  LOCAL buf1pct! = 100*buf1n%/MAX_NUM_ROWS%
+  LOCAL clppct! = 100*clpn%/MAX_NUM_ROWS%
+  LOCAL undopct! = 100*undon%/MAX_NUM_ROWS%
+  
+  DO WHILE ii% < MAX_NUM_ROWS%
+    IF isAllocated%(ii%) THEN
+      linePoolUtil% = linePoolUtil% + 1
+    ENDIF
+    ii% = ii%+1
+  LOOP
+
+  LOCAL linepct! = 100*linePoolUtil%/MAX_NUM_ROWS%
+  
+  PAGE WRITE 3
+  CLS
+  
+  COLOR BG_COLOR%, FG_COLOR2%
+  BOX 0, 0, boxWidth%, boxHeight%, 4, BG_COLOR2%, FG_COLOR2%
+  
+  LOCAL x% = 2*COL_WIDTH%
+  LOCAL y% = 2*ROW_HEIGHT%
+
+  LOCAL title$ = "XEdit Resource Utilization"
+  TEXT x%, y%, SPACE$((longestStringLen% - LEN(title$))\2) + title$
+  y% = y% + 2*ROW_HEIGHT%
+
+  TEXT x%, y%, "Buffer 1 Utilization         = " + FORMAT$(buf0n%, "%5g") + "/" + STR$(MAX_NUM_ROWS%) + " (" + FORMAT$(buf0pct!,"%5.2f") + "%)"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Buffer 2 Utilization         = " + FORMAT$(buf1n%, "%5g") + "/" + STR$(MAX_NUM_ROWS%) + " (" + FORMAT$(buf1pct!,"%5.2f") + "%)"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Clipboard Buffer Utilization = " + FORMAT$(clpn%, "%5g") + "/" + STR$(MAX_NUM_ROWS%) + " (" + FORMAT$(clppct!,"%5.2f") + "%)"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Undo Buffer Utilization      = " + FORMAT$(undon%, "%5g") + "/" + STR$(MAX_NUM_ROWS%) + " (" + FORMAT$(undopct!,"%5.2f") + "%)"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Line Pool Utilization        = " + FORMAT$(linePoolUtil%, "%5g") + "/" + STR$(MAX_NUM_ROWS%) + " (" + FORMAT$(linepct!,"%5.2f") + "%)"
+
+  PAGE WRITE 0
+  COLOR FG_COLOR%, BG_COLOR%
+
+  BLIT 0, 0, MM.HRES/2 - boxWidth%/2, MM.VRES/2 - boxHeight%/2, boxWidth%, boxHeight%, 3
 END SUB
 
 '--> Save current position of buffer in window and cursor in window so we can go back to it
@@ -1706,7 +1833,61 @@ SUB drawWinRow(wIdx%, winRow%, checkOtherWin%)
   ENDIF
 END SUB
 
-SUB winContentsScrollUp(wIdx%, startRow%)
+'Renders one column of text, used when scrolling horizontally.
+SUB drawColWcolor(wIdx%, wCol%)
+  LOCAL bIdx% = winBuf%(wIdx%)
+  LOCAL bufTopRow% = winBufTopRow%(wIdx%)
+  LOCAL bufCol% = winBufTopCol%(wIdx%)+wCol%
+  LOCAL numRows% = winNumRows%(wIdx%)
+  LOCAL x% = winColToXpos%(wIdx%, wCol%)
+  LOCAL y% = winRowToYpos%(wIdx%, 0)
+  LOCAL colTxt$ = "", c$
+  LOCAL ii% = 0, linePtr%
+  
+  IF bufSynHLEnabled%(bIdx%) THEN
+    PAGE WRITE 4 'syntax highlighting color boxes go onto page 4.
+    DO WHILE ii% < numRows%
+      linePtr% = bufLinePtrs%(bufTopRow%+ii%, bIdx%)
+      c$ = MID$(theStrings$(linePtr%), 1+bufCol%, 1)
+      IF c$="" THEN
+        c$= " "
+      ELSE
+        'Set these up each time before calling syntaxHighLight
+        parserCSUBCtxt%(PARSER_START_COL%) = bufCol%+1 'Make one based
+        parserCSUBCtxt%(PARSER_END_COL%) = bufCol%+2 'Make one based
+        parserCSUBCtxt%(PARSER_LINE_X%) = x%
+        parserCSUBCtxt%(PARSER_LINE_Y%) = y% + ii%*ROW_HEIGHT%
+
+        syntaxHighLight parserCSUBCtxt%(0), theStrings$(linePtr%), KEYWORD_LIST$(0)
+      ENDIF  
+      colTxt$ = colTxt$ + c$
+      ii% = ii% + 1
+    LOOP
+    
+    PAGE WRITE 3 'Text goes onto page 3.
+    COLOR 0, BG_COLOR%
+    TEXT x%, y%, colTxt$, "LTV" 'Vertical TEXT
+    
+    PAGE WRITE 4
+    BLIT x%, y%, x%, y%, COL_WIDTH%, ROW_HEIGHT%*numRows%, 3, 4 'From page 3 to page 4
+    PAGE WRITE 0
+    BLIT x%, y%, x%, y%, COL_WIDTH%, ROW_HEIGHT%*numRows%, 4 'From page 4 to page 0
+  ELSE
+    DO WHILE ii% < numRows%
+      linePtr% = bufLinePtrs%(bufTopRow%+ii%, bIdx%)
+      c$ = MID$(theStrings$(linePtr%), 1+bufCol%, 1)
+      IF c$="" THEN
+        c$= " "
+      ENDIF  
+      colTxt$ = colTxt$ + c$
+      ii% = ii% + 1
+    LOOP
+    
+    TEXT x%, y%, colTxt$, "LTV" 'Vertical TEXT
+  ENDIF
+END SUB
+
+SUB winContentsScrollUp(wIdx%, startRow%, endRow%)
   LOCAL savedCrsrState%
   LOCAL wX% = winContentX%(wIdx%), wY% = winContentY%(wIdx%)
   LOCAL numRows% = winNumRows%(wIdx%)
@@ -1715,10 +1896,10 @@ SUB winContentsScrollUp(wIdx%, startRow%)
     savedCrsrState% = crsrDisable%()
   ENDIF
 
-  IF startRow% < numRows%-1 THEN
-    BLIT wX%, wY%+(1+startRow%)*ROW_HEIGHT%, wX%, wY%+startRow%*ROW_HEIGHT, winNumCols%(wIdx%)*COL_WIDTH%, (numRows%-1-startRow%)*ROW_HEIGHT%
+  IF startRow% < endRow% THEN
+    BLIT wX%, wY%+(1+startRow%)*ROW_HEIGHT%, wX%, wY%+startRow%*ROW_HEIGHT, winNumCols%(wIdx%)*COL_WIDTH%, (endRow%-startRow%)*ROW_HEIGHT%
   ENDIF
-  drawWinRow wIdx%, numRows%-1, 0
+  drawWinRow wIdx%, endRow%, 0
   
   IF wIdx% = crsrActiveWidx% THEN
     crsrRestore savedCrsrState%
@@ -1737,6 +1918,42 @@ SUB winContentsScrollDown(wIdx%, startRow%)
     BLIT wX%, wY%+startRow%*ROW_HEIGHT%, wX%, wY%+(startRow%+1)*ROW_HEIGHT%, winNumCols%(wIdx%)*COL_WIDTH%, (numRows%-startRow%-1)*ROW_HEIGHT%
   ENDIF
   drawWinRow wIdx%, startRow%, 0
+
+  IF wIdx% = crsrActiveWidx% THEN
+    crsrRestore savedCrsrState%
+  ENDIF  
+END SUB
+
+SUB winContentsScrollLeft(wIdx%)
+  LOCAL savedCrsrState%
+  LOCAL wX% = winContentX%(wIdx%), wY% = winContentY%(wIdx%)
+  LOCAL winRow%, col%=winNumCols%(wIdx%)-1 'col% is the column where the scrolled-in text should go.
+  
+  IF wIdx% = crsrActiveWidx% THEN
+    savedCrsrState% = crsrDisable%()
+  ENDIF
+
+  BLIT wX%+COL_WIDTH%, wY%, wX%, wY%, col%*COL_WIDTH%, winNumRows%(wIdx%)*ROW_HEIGHT%
+
+  drawColWcolor(wIdx%, col%)
+
+  IF wIdx% = crsrActiveWidx% THEN
+    crsrRestore savedCrsrState%
+  ENDIF  
+END SUB
+
+SUB winContentsScrollRight(wIdx%)
+  LOCAL savedCrsrState%
+  LOCAL wX% = winContentX%(wIdx%), wY% = winContentY%(wIdx%)
+  LOCAL winRow%, col%=0 'col% is the column where the scrolled-in text should go.
+  
+  IF wIdx% = crsrActiveWidx% THEN
+    savedCrsrState% = crsrDisable%()
+  ENDIF
+
+  BLIT wX%, wY%, wX%+COL_WIDTH%, wY%, (winNumCols%(wIdx%)-1)*COL_WIDTH%, winNumRows%(wIdx%)*ROW_HEIGHT%
+
+  drawColWcolor(wIdx%, col%)
 
   IF wIdx% = crsrActiveWidx% THEN
     crsrRestore savedCrsrState%
@@ -1892,10 +2109,20 @@ END SUB
 
 'Scroll horizontally a number of columns. Positive numCols% is scroll left.
 SUB scrollHdelta(wIdx%, numCols%)
-  IF numCols% THEN
-    winBufTopCol%(wIdx%) = winBufTopCol%(wIdx%) + numCols%
-    winRedrawAction%(wIdx%) = FULL_REDRAW%
+  IF numCols%=0 THEN
+    EXIT SUB
   ENDIF
+  
+  winBufTopCol%(wIdx%) = winBufTopCol%(wIdx%) + numCols%
+  
+  SELECT CASE numCols%
+    CASE 1
+      winRedrawAction%(wIdx%) = SCROLL_LEFT%
+    CASE -1
+      winRedrawAction%(wIdx%) = SCROLL_RIGHT%
+    CASE ELSE
+      winRedrawAction%(wIdx%) = FULL_REDRAW%
+  END SELECT
 END SUB
 
 'Scroll vertically a number of rows. Positive numRows% is scroll down.
@@ -1907,6 +2134,7 @@ SUB scrollVdelta(wIdx%, numRows%)
     winRedrawAction%(wIdx%) = SCROLL_DOWN%
   ELSEIF numRows% = 1 THEN
     winContentScrollUpStartRow% = 0
+    winContentScrollUpEndRow% = winNumRows%(wIdx%) - 1
     winRedrawAction%(wIdx%) = SCROLL_UP%
   ELSE
     winRedrawAction%(wIdx%) = FULL_REDRAW%
@@ -1945,7 +2173,7 @@ END SUB
 
 SUB toggleScreenSplitKeyHandler
   LOCAL ii%, bIdx%
-  
+    
   splitMode% = splitMode%+1
 
   IF splitMode% >= NUM_SPLIT_MODES% THEN
@@ -1960,8 +2188,17 @@ SUB toggleScreenSplitKeyHandler
 
     CASE VSPLIT%
       crsrOff
-      resizeWindow 0, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_H%
-      resizeWindow 1, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_H%
+      
+      LOCAL leftw%
+      'Active window should go where cursor is
+      IF winWinCrsrCol%(crsrActiveWidx%) < winNumCols%(crsrActiveWidx%)\2 THEN
+        leftw% = crsrActiveWidx% 'Cursor is in left half
+      ELSE
+        leftw% = NOT crsrActiveWidx% 'Cursor is in right half
+      ENDIF
+      
+      resizeWindow leftw%, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_H%
+      resizeWindow NOT leftw%, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%\2, FULL_SCREEN_WINDOW_H%
       
       gotoBufPos winBufCrsrRow%(crsrActiveWidx%), winBufCrsrCol%(crsrActiveWidx%), 0, 1
       
@@ -1977,8 +2214,17 @@ SUB toggleScreenSplitKeyHandler
 
     CASE HSPLIT%
       crsrOff
-      resizeWindow 0, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%, FULL_SCREEN_WINDOW_H%\2
-      resizeWindow 1, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y% + FULL_SCREEN_WINDOW_H%\2, FULL_SCREEN_WINDOW_W%, FULL_SCREEN_WINDOW_H%\2
+      
+      LOCAL topw%
+      'Active window should go where cursor is
+      IF winWinCrsrRow%(crsrActiveWidx%) < winNumRows%(crsrActiveWidx%)\2 THEN
+        topw% = crsrActiveWidx% 'Cursor is in top half
+      ELSE
+        topw% = NOT crsrActiveWidx% 'Cursor is in bottom half
+      ENDIF
+
+      resizeWindow topw%, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y%, FULL_SCREEN_WINDOW_W%, FULL_SCREEN_WINDOW_H%\2
+      resizeWindow NOT topw%, FULL_SCREEN_WINDOW_X%, FULL_SCREEN_WINDOW_Y% + FULL_SCREEN_WINDOW_H%\2, FULL_SCREEN_WINDOW_W%, FULL_SCREEN_WINDOW_H%\2
 
       gotoBufPos winBufCrsrRow%(crsrActiveWidx%), winBufCrsrCol%(crsrActiveWidx%), 0, 1
 
@@ -2092,18 +2338,18 @@ SUB closeBufferKeyHandler
 END SUB
 
 SUB crsrRightKeyHandler
-  crsrRight 1
+  crsrRightImp 1 'with drawing
 END SUB
 
 SUB crsrRight num%
   LOCAL ii%=0
   DO WHILE ii%<num%
-    crsrRightImp
+    crsrRightImp 0 'without drawing
     ii%=ii%+1
   LOOP
 END SUB
 
-SUB crsrRightImp
+SUB crsrRightImp(draw%) 'Set draw% to 0 to skip drawing.
   'First figure out the new buffer cursor position
   LOCAL bIdx% = winBuf%(crsrActiveWidx%)
   LOCAL oldBufCrsrCol% = winBufCrsrCol%(crsrActiveWidx%)
@@ -2152,13 +2398,18 @@ SUB crsrRightImp
     scrollHoffset crsrActiveWidx%, 0
   ENDIF
 
+  IF NOT draw% THEN
+    EXIT SUB
+  ENDIF
+  
   IF selectMode%(crsrActiveWidx%) THEN
+    crsrOff
+
     SELECT CASE winRedrawAction%(crsrActiveWidx%)
       CASE SCROLL_UP%, SCROLL_DOWN%
         winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
     END SELECT
     
-    crsrOff
     drawWinRow crsrActiveWidx%, oldWinCrsrRow%, 1
     drawWinRow crsrActiveWidx%, newWinCrsrRow%, 1
   ENDIF
@@ -2167,12 +2418,12 @@ END SUB
 SUB crsrLeft num%
   LOCAL ii%=0
   DO WHILE ii%<num%
-    crsrLeftImp
+    crsrLeftImp 0 'without drawing
     ii%=ii%+1
   LOOP
 END SUB
 
-SUB crsrLeftImp
+SUB crsrLeftImp draw% 'Set to 0 to skip drawing
   LOCAL prevLin$
   LOCAL prevLinLen%
 
@@ -2223,6 +2474,10 @@ SUB crsrLeftImp
     scrollHdelta crsrActiveWidx%, newBufCrsrCol% - (winNumCols%(crsrActiveWidx%) - 1)
   ENDIF
 
+  IF NOT draw% THEN
+    EXIT SUB
+  ENDIF
+
   IF selectMode%(crsrActiveWidx%) THEN
     SELECT CASE winRedrawAction%(crsrActiveWidx%)
       CASE SCROLL_UP%, SCROLL_DOWN%
@@ -2236,7 +2491,7 @@ SUB crsrLeftImp
 END SUB
 
 SUB crsrLeftKeyHandler
-  crsrLeft 1
+  crsrLeftImp 1
 END SUB
 
 SUB crsrDown num%
@@ -2262,7 +2517,7 @@ SUB crsrDownImp
     winBufCrsrCol%(crsrActiveWidx%) = MIN(winBufCrsrTargetCol%(crsrActiveWidx%), nextLinLen%)
   ELSE
     endKeyHandler 1 'On the last row, jump to the last column.
-    END SUB
+    EXIT SUB
   ENDIF
 
   'Then figure out the new window cursor position
@@ -2277,25 +2532,28 @@ SUB crsrDownImp
     ENDIF
   ENDIF
 
-  LOCAL newWinCrsrCol% = MIN(newBufCrsrCol%, winNumCols%(crsrActiveWidx%)-1)
-  winWinCrsrCol%(crsrActiveWidx%) = newWinCrsrCol%
-
-  'Finally figure out if we should scroll.
+  'Figure out if we should scroll vertically
   LOCAL newWinCrsrRow% = winWinCrsrRow%(crsrActiveWidx%)
-
   IF (newBufCrsrRow% > oldBufCrsrRow%) AND (oldWinCrsrRow% = newWinCrsrRow%) THEN
     scrollVdelta crsrActiveWidx%, 1
   ENDIF
 
-  scrollHoffset crsrActiveWidx%, newBufCrsrCol% - newWinCrsrCol%
-
+  'Figure out if we should scroll horizontally
+  IF newBufCrsrCol% <> oldBufCrsrCol% THEN
+    LOCAL newWinCrsrCol% = MIN(newBufCrsrCol%, winNumCols%(crsrActiveWidx%)-1)  
+    winWinCrsrCol%(crsrActiveWidx%) = newWinCrsrCol%
+    scrollHoffset crsrActiveWidx%, newBufCrsrCol% - newWinCrsrCol%
+  ENDIF
+  
   IF selectMode%(crsrActiveWidx%) THEN
     SELECT CASE winRedrawAction%(crsrActiveWidx%)
-      CASE SCROLL_UP%, SCROLL_DOWN%
+      CASE SCROLL_UP%
+        winContentScrollUpEndRow% = winNumRows%(crsrActiveWidx%)-2
+      CASE SCROLL_DOWN%
         winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
     END SELECT
 
-    IF NOT winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW% THEN  
+    IF winRedrawAction%(crsrActiveWidx%) <> FULL_REDRAW% THEN  
       crsrOff
       drawWinRow crsrActiveWidx%, oldWinCrsrRow%, 1
       drawWinRow crsrActiveWidx%, newWinCrsrRow%, 1
@@ -2343,25 +2601,29 @@ SUB crsrUpImp
     ENDIF
   ENDIF
 
-  winWinCrsrCol%(crsrActiveWidx%) = MIN(newBufCrsrCol%, winNumCols%(crsrActiveWidx%)-1)
-
-  'Finally figure out if we should scroll.
+  'Figure out if we should scroll vertically.
   LOCAL newWinCrsrRow% = winWinCrsrRow%(crsrActiveWidx%)
-  LOCAL newWinCrsrCol% = winWinCrsrCol%(crsrActiveWidx%)
 
   IF (newBufCrsrRow% < oldBufCrsrRow%) AND (oldWinCrsrRow% = newWinCrsrRow%) THEN
     scrollVdelta crsrActiveWidx%, -1
   ENDIF 
 
-  scrollHoffset crsrActiveWidx%, newBufCrsrCol% - newWinCrsrCol%
-
+  'Figure out if we should scroll horizontally.
+  IF newBufCrsrCol% <> oldBufCrsrCol% THEN
+    LOCAL newWinCrsrCol% = MIN(newBufCrsrCol%, winNumCols%(crsrActiveWidx%)-1)
+    winWinCrsrCol%(crsrActiveWidx%) = newWinCrsrCol%
+    scrollHoffset crsrActiveWidx%, newBufCrsrCol% - newWinCrsrCol%
+  ENDIF
+  
   IF selectMode%(crsrActiveWidx%) THEN
     SELECT CASE winRedrawAction%(crsrActiveWidx%)
-      CASE SCROLL_UP%, SCROLL_DOWN%
+      CASE SCROLL_UP%
         winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
+      CASE SCROLL_DOWN%
+        winContentScrollDownStartRow% = 1
     END SELECT
   
-    IF NOT winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW% THEN
+    IF winRedrawAction%(crsrActiveWidx%) <> FULL_REDRAW% THEN
       crsrOff
       drawWinRow crsrActiveWidx%, oldWinCrsrRow%, 1
       drawWinRow crsrActiveWidx%, newWinCrsrRow%, 1
@@ -2848,6 +3110,7 @@ FUNCTION delete%()
         crsrOff
         drawWinRow crsrActiveWidx%, winWinCrsrRow%(crsrActiveWidx%), 0 
         winContentScrollUpStartRow% = winWinCrsrRow%(crsrActiveWidx%)+1
+        winContentScrollUpEndRow% = winNumRows%(crsrActiveWidx%)-1
         winRedrawAction%(crsrActiveWidx%) = SCROLL_UP%
       ENDIF
 
@@ -3443,12 +3706,13 @@ END SUB
 'Paste from clipboard
 SUB pasteKeyHandler
   LOCAL numRows% = bufNumRows%(CLIPBOARD_BIDX%)
-  LOCAL startRow%, startCol%
+  LOCAL startRow%, startCol% 
   IF numRows% = 0 THEN 'Nothing to paste.
     EXIT SUB
   ENDIF
 
   promptMsg "Pasting...", 1
+
   IF selectMode%(crsrActiveWidx%) THEN
     registerForUndo UNDO_DELETE_SELECTION%
     IF NOT deleteSelection%() THEN
@@ -3521,7 +3785,7 @@ SUB pasteKeyHandler
 
   crsrRight LEN(lin2$) 
 
-  'Note that typically we register for undo before applying the action but her
+  'Note that typically we register for undo before applying the action but here
   'we do it after.
   winSelectCol%(crsrActiveWidx%) = startCol%
   winSelectRow%(crsrActiveWidx%) = startRow%
@@ -3529,20 +3793,19 @@ SUB pasteKeyHandler
   winSelectCol%(crsrActiveWidx%) = -1
   winSelectRow%(crsrActiveWidx%) = -1
 
-  IF numRows%=1 THEN
+  IF (numRows%=1) AND (winRedrawAction%(crsrActiveWidx%) = NO_REDRAW%) THEN
     drawWinRow crsrActiveWidx%, winWinCrsrRow%(crsrActiveWidx%), 1
   ELSE
-    LOCAL oWidx%  = NOT crsrActiveWidx%
+    LOCAL oWidx% = NOT crsrActiveWidx%
     winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
         
-    IF winBuf%(0) = winBuf%(1) THEN 
+    IF winVisible%(oWidx%) AND (winBuf%(0) = winBuf%(1)) THEN 
       IF winBufTopRow%(oWidx%) > winBufCrsrRow%(crsrActiveWidx%) THEN
         'Looking at same buffer further down out of view -> just adjust cursor position.
         winBufTopRow%(oWidx%) = winBufTopRow%(oWidx%) + numRows% - 1
         winBufCrsrRow%(oWidx%) = winBufCrsrRow%(oWidx%) + numRows% - 1
       ELSEIF winBufTopRow%(oWidx%) + winNumRows%(oWidx%) < startRow% THEN
         'Out of view further up -> nothing to do
-        EXIT SUB
       ELSE    
         'Other window looks into the same buffer, redraw that one too.
         winRedrawAction%(oWidx%) = FULL_REDRAW%
@@ -4116,6 +4379,12 @@ SUB resetUndo(withPrompt%)
     undoIdx% = ii%
     clrUndoEntry
   NEXT ii%
+  
+  ii%=0
+  DO WHILE ii% < bufNumRows%(UNDO_BIDX%)
+    freeLine bufLinePtrs%(ii%, UNDO_BIDX%)
+    ii% = ii%+1
+  LOOP
   bufNumRows%(UNDO_BIDX%) = 0
   undoIdx% = 0
   'Hack: boost key count to make sure pending undo records are aborted.
@@ -4126,8 +4395,27 @@ SUB saveFile
   LOCAL bIdx% = winBuf%(crsrActiveWidx%)
   LOCAL row% = 0
   LOCAL lin$
+  LOCAL ii%=NUM_BACKUP_FILES%
 
-  promptMsg "Saving...", 1
+  promptMsg "Saving "+ bufFilename$(bIdx%) + " ...", 1
+   
+  IF DIR$(bufFilename$(bIdx%)+".ba"+STR$(ii%), FILE) <> "" THEN
+    KILL bufFilename$(bIdx%)+".ba"+STR$(ii%)
+  ENDIF
+  
+  DO WHILE ii% > 0
+    IF ii% = 1 THEN
+      IF DIR$(bufFilename$(bIdx%), FILE) <> "" THEN
+        RENAME bufFilename$(bIdx%) AS bufFilename$(bIdx%)+".ba1"
+      ENDIF
+    ELSE
+      IF DIR$(bufFilename$(bIdx%)+".ba"+STR$(ii%-1), FILE) <> "" THEN
+        RENAME bufFilename$(bIdx%)+".ba"+STR$(ii%-1) AS bufFilename$(bIdx%)+".ba"+STR$(ii%)
+      ENDIF
+    ENDIF   
+    ii% = ii% - 1
+  LOOP
+  
   OPEN bufFilename$(bIdx%) FOR OUTPUT AS #1
 
   DO WHILE row% < bufNumRows%(bIdx%)
@@ -4182,9 +4470,38 @@ SUB paasei
 END SUB
 
 SUB helpKeyHandler
-  showHelpPopup
+  CONST SHOW_KEYB% = 1
+  CONST SHOW_USR_CFG% = 2
+  CONST EXIT_HELP% = 0  
+  LOCAL state% = SHOW_KEYB%
+  
+  DO
+    SELECT CASE state%
+      CASE SHOW_KEYB%
+        showKeybindPopup
+        IF promptForAnyKey$("") = CRSR_RIGHT_INKEY$ THEN
+          state% = SHOW_USR_CFG%
+        ELSE
+          state% = EXIT_HELP%
+        ENDIF
+
+      CASE SHOW_USR_CFG%
+        showUserCfgPopup
+        IF promptForAnyKey$("") = CRSR_LEFT_INKEY$ THEN
+          state% = SHOW_KEYB%
+        ELSE
+          state% = EXIT_HELP%          
+        ENDIF     
+    END SELECT
+    
+    removePopup
+  LOOP UNTIL state% = EXIT_HELP%
+END SUB
+
+SUB resourceUtilKeyHandler
+  showResUtilPopup
   LOCAL dummy$ = promptForAnyKey$("")
-  removeHelpPopup
+  removePopup
 END SUB
 
 SUB screenshotKeyHandler
@@ -4272,22 +4589,53 @@ SUB runProgKeyHandler
   
   requestExit bufFilename$(bIdx%)
 END SUB
+
+SUB killToEOLkeyHandler
+  winSelectCol%(crsrActiveWidx%) = winBufCrsrCol%(crsrActiveWidx%)
+  winSelectRow%(crsrActiveWidx%) = winBufCrsrRow%(crsrActiveWidx%)
+  
+  endKeyHandler 1
+  
+  registerForUndo UNDO_DELETE_SELECTION%
+  IF NOT deleteSelection%() THEN
+    undoRegisterForUndo
+    EXIT SUB
+  ENDIF
+END SUB
+
+SUB selectAllKeyHandler
+  winSelectCol%(crsrActiveWidx%) = 0
+  winSelectRow%(crsrActiveWidx%) = 0
+  endKeyHandler 3
+  winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
+END SUB
+
 '<-- End of Key Handler section
 
 '--> Keypress with modifiers and selection logic.
 
-'Returns true if selection should be cleared by this keyPress
-FUNCTION clrSelectionKey%(key%)
+'Returns true if selection should be cleared by this keyPress before handling the keypress.
+FUNCTION clrSelectionBeforeKey%(key%)
+  SELECT CASE key%
+    CASE CRSR_UP_KEY%, CRSR_DOWN_KEY%, CRSR_LEFT_KEY%, CRSR_RIGHT_KEY%, PGUP_KEY%, PGDOWN_KEY%, HOME_KEY%, END_KEY%
+      clrSelectionBeforeKey% = 1
+    CASE ELSE
+      clrSelectionBeforeKey% = 0
+  END SELECT
+END FUNCTION
+
+'Returns true if selection should be cleared by this keyPress after handling the keypress.
+FUNCTION clrSelectionAfterKey%(key%)
   IF isShiftNavKey%(key%) THEN
-    clrSelectionKey% = 0
+    clrSelectionAfterKey% = 0
     EXIT FUNCTION
   ENDIF
 
   SELECT CASE key%
-    CASE INDENT_KEY%, UNINDENT_KEY%, COPY_KEY%, UNDO_KEY%
-      clrSelectionKey% = 0
+    CASE INDENT_KEY%, UNINDENT_KEY%, COPY_KEY%, UNDO_KEY%, SELECT_ALL_KEY%
+      clrSelectionAfterKey% = 0
     CASE ELSE
-      clrSelectionKey% = 1
+      clrSelectionAfterKey% = 1
   END SELECT
 END FUNCTION
 
@@ -4420,7 +4768,26 @@ SUB handleKey pressedKey%
       winSelectRow%(crsrActiveWidx%) = winBufCrsrRow%(crsrActiveWidx%)
     ENDIF
   ENDIF
-  
+
+  IF clrSelectionBeforeKey%(pressedKey%) THEN
+    'Clear selection
+    IF selectMode%(crsrActiveWidx%) THEN
+      winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
+    ENDIF
+
+    nSelectConsecPresses% = 0
+    winSelectCol%(crsrActiveWidx%) = -1
+    winSelectRow%(crsrActiveWidx%) = -1
+  ENDIF
+
+  IF selectMode%(crsrActiveWidx%) THEN
+    IF clrSelectionAfterKey%(pressedKey%) THEN
+      'Dont't clear yet but signal full redraw so key handlers can take that
+      'into account.
+      winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
+    ENDIF
+  ENDIF
+    
   IF (pressedKey% = HOME_KEY%) OR (pressedKey% = SELECT_HOME_KEY%) THEN
     nConsecHomePresses% = nConsecHomePresses% + 1
   ELSE
@@ -4519,6 +4886,12 @@ SUB handleKey pressedKey%
       showConsoleKeyHandler
     CASE RUN_PROG_KEY%
       runProgKeyHandler
+    CASE KILL_TO_EOL_KEY%
+      killToEOLkeyHandler
+    CASE RESOURCE_UTIL_KEY%
+      resourceUtilKeyHandler
+    CASE SELECT_ALL_KEY%
+      selectAllKeyHandler
     CASE ELSE
       pressedKey% = pressedKey% AND 255
       IF isPrintable%(pressedKey%) THEN
@@ -4527,7 +4900,7 @@ SUB handleKey pressedKey%
       ENDIF
   END SELECT
 
-  IF clrSelectionKey%(pressedKey%) THEN
+  IF clrSelectionAfterKey%(pressedKey%) THEN
     'Clear selection
     IF selectMode%(crsrActiveWidx%) THEN
       winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
