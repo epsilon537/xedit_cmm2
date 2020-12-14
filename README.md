@@ -6,7 +6,7 @@ ChangeLog
 ---------
 0.6:
 - Critical Bug Fix: Pressing enter twice on last line in window triggered an incorrect page
-  redraw action (scroll down instead of up) so it would look as if the line disappeared.
+  redraw action so it would look as if the line disappeared.
 - Critical Bug Fix: Ctrl-X (Cut) without active selection triggers program abort.
 - Bug Fix: In SERIAL_INPUT_COMPAT_MODE, toggle selection (Esc) was broken in 0.5.
 - In SERIAL_INPUT_COMPAT_MODE replaced Ctrl-B with Shift-Tab. This key binding only works
@@ -14,7 +14,7 @@ ChangeLog
 - Added more keywords for syntax highlighting.
 - New key binding: Ctrl-M = Scroll current line to Center of Window
 - New key binding: Alt-M  = Scroll current line to Top of Window
-- V5.06 FW compatilibity fixes.
+- V5.06 FW compatibility fixes.
   
 0.5:
 - Improved horizontal scrolling speed.
