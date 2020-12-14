@@ -1,9 +1,21 @@
 XEdit Text Editor for Color Maximite 2 by Epsilon
 -------------------------------------------------
-Current Version: 0.5
+Current Version: 0.6
 
 ChangeLog
 ---------
+0.6:
+- Critical Bug Fix: Pressing enter twice on last line in window triggered an incorrect page
+  redraw action (scroll down instead of up) so it would look as if the line disappeared.
+- Critical Bug Fix: Ctrl-X (Cut) without active selection triggers program abort.
+- Bug Fix: In SERIAL_INPUT_COMPAT_MODE, toggle selection (Esc) was broken in 0.5.
+- In SERIAL_INPUT_COMPAT_MODE replaced Ctrl-B with Shift-Tab. This key binding only works
+  with V5.06 FW.
+- Added more keywords for syntax highlighting.
+- New key binding: Ctrl-M = Scroll current line to Center of Window
+- New key binding: Alt-M  = Scroll current line to Top of Window
+- V5.06 FW compatilibity fixes.
+  
 0.5:
 - Improved horizontal scrolling speed.
 - More sensible buffer position when toggling window split (F5).
@@ -93,7 +105,6 @@ insert/overwrite mode, goto line.
 To Dos
 ------
 - Add support for vegipete's FileDialog.
-- Add scroll current line to center/top/end key bindings.
 - Add case sensitive search/replace keybindings.
 - Smart, escapable line input, allowing entering commas and double quotes on prompt. 
 - Support copy-to-clipboard from console screen.
@@ -121,7 +132,9 @@ Ctrl-G      = Goto Line
 INS         = Toggle Insert/Overwrite mode (Ctrl-W in SERIAL_INPUT_COMPAT_MODE)
 Home 1/2/3x = Go To Start of Line/Page/Buffer
 End 1/2/3x  = Go To End of Line/Page/Buffer
-Tab/Shift-Tab = Indent/Unindent Line/Selection (Tab/Ctrl-B in SERIAL_INPUT_COMPAT_MODE)
+Ctrl-M      = Scroll current line to Center of Window
+Alt-M       = Scroll current line to Top of Window
+Tab/Shift-Tab = Indent/Unindent Line/Selection
 Shift-Navigation Key = Start/Extend Selection
 (Esc toggles selection mode in SERIAL_INPUT_COMPAT_MODE)
 Ctrl-A      = Select All
@@ -157,4 +170,6 @@ Limitations
 includes double quotes and commas however.
 - Edit and Clipboard operations are not supported on buffer in show console mode.
 - No undo for replace operations.
-- Tested on FW version 5.0505 only.
+
+
+                                                                                            

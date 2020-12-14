@@ -79,7 +79,7 @@ ENDIF
 
 FONT 1, 1
 
-CONST VERSION$ = "0.5"
+CONST VERSION$ = "0.6"
 
 IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   'Key code mode:
@@ -118,6 +118,7 @@ IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   CONST KEY_CTRL_K% = 267
   CONST KEY_CTRL_Z% = 282
   CONST KEY_CTRL_SPC% = 288
+  CONST KEY_CTRL_M% = 365
   CONST KEY_CTRL_N% = 270
   CONST KEY_CTRL_O% = 271
   CONST KEY_CTRL_P% = 272
@@ -137,12 +138,18 @@ IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   
   CONST KEY_ALT_C% = 611
   CONST KEY_ALT_F% = 614
+  CONST KEY_ALT_H% = 616
   CONST KEY_ALT_K% = 619
   CONST KEY_ALT_L% = 620
+  CONST KEY_ALT_M% = 621
   CONST KEY_ALT_N% = 622 
   CONST KEY_ALT_R% = 626
   CONST KEY_ALT_S% = 627
-  CONST KEY_SHFT_TAB% = 1033
+  IF MM.INFO(VERSION) >= 5.06 THEN
+    CONST KEY_SHFT_TAB% = 1183
+  ELSE
+    CONST KEY_SHFT_TAB% = 1033
+  ENDIF
 ELSE
   'SERIAL/INKEY mode:
   CONST KEY_INS = -1
@@ -156,13 +163,19 @@ ELSE
   CONST KEY_SHFT_CRSR_R% = -1
   CONST KEY_ALT_C% = -1
   CONST KEY_ALT_F% = -1
+  CONST KEY_ALT_H% = -1
   CONST KEY_ALT_K% = -1
   CONST KEY_ALT_L% = -1
+  CONST KEY_ALT_M% = -1
   CONST KEY_ALT_N% = -1
   CONST KEY_ALT_R% = -1
   CONST KEY_ALT_S% = -1
-  CONST KEY_SHFT_TAB% = -1
-
+  IF MM.INFO(VERSION) >= 5.06 THEN
+    CONST KEY_SHFT_TAB% = 159
+  ELSE
+    CONST KEY_SHFT_TAB% = -1
+  ENDIF
+  
   CONST KEY_ESC% = 27  
 
   CONST KEY_BCKSPC% = 8
@@ -197,6 +210,7 @@ ELSE
   CONST KEY_CTRL_G% = 7
   CONST KEY_CTRL_K% = 11
   CONST KEY_CTRL_Z% = 26
+  CONST KEY_CTRL_M% = -1
   CONST KEY_CTRL_N% = 14
   CONST KEY_CTRL_O% = 15
   CONST KEY_CTRL_P% = 16
@@ -244,11 +258,7 @@ CONST SELECT_CRSR_L_KEY% = KEY_SHFT_CRSR_L%
 CONST SELECT_CRSR_R_KEY% = KEY_SHFT_CRSR_R%
 CONST ENTER_KEY% = KEY_LF%
 CONST INDENT_KEY% = KEY_TAB%
-IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
-  CONST UNINDENT_KEY% = KEY_SHFT_TAB%
-ELSE
-  CONST UNINDENT_KEY% = KEY_CTRL_B%
-ENDIF
+CONST UNINDENT_KEY% = KEY_SHFT_TAB%
 CONST DELETE_KEY% = KEY_DEL%
 CONST BACKSPACE_KEY% = KEY_BCKSPC%
 CONST TOGGLE_SHOW_KEYCODE_AT_PROMPT% = KEY_ALT_K%
@@ -276,6 +286,8 @@ ENDIF
 CONST KILL_TO_EOL_KEY% = KEY_CTRL_K%
 CONST RESOURCE_UTIL_KEY% = KEY_ALT_R%
 CONST SELECT_ALL_KEY% = KEY_CTRL_A%
+CONST MOVE_TO_CENTER_KEY% = KEY_CTRL_M%
+CONST MOVE_TO_TOP_KEY% = KEY_ALT_M%
 '<-- Key Bindings
 
 CONST MAX_NUM_ROWS% = 14000 'This is the total number of lines available, across all buffers, including clipboard and undo buffer.
@@ -506,7 +518,7 @@ KEYWORD_LIST_DATA:
   DATA "FIELD", "FIX", "FORMAT", "GETSCANLINE", "GPS", "HEX", "INKEY", "KEYDOWN"
   DATA "LGETBYTE", "LGETSTR", "LINSTR", "LLEN", "LOC", "LOF", "LOG", "NUNCHUK", "OCT"
   DATA "PI", "PULSIN", "RAD", "RND", "SGN", "SIN","STR2BIN", "SQR", "STR", "TAB", "TAN"
-  DATA "endSentinel" 'Keep this at the end of the list. Do not delete.
+  DATA "INC", "RESIZE", "TRANSPARENCY", "CONCAT", "SETBYTE", "endSentinel" 'Keep this at the end of the list. Do not delete.
    
 SUB scanCmdList
   LOCAL cmd$
@@ -965,7 +977,7 @@ END SUB
 'Popup is prepared on a separate page in a Box, then shown on page 0 using blit.
 SUB showKeybindPopup                                                                
   LOCAL longestStringLen% = LEN("Key Bindings (Ref. Key Bindings section in XEdit.bas to modify):")
-  LOCAL numLines% = 37
+  LOCAL numLines% = 39
   LOCAL boxWidth% = (longestStringLen%+4)*COL_WIDTH%
   LOCAL boxHeight% = (numLines%+4)*ROW_HEIGHT%
 
@@ -1024,13 +1036,13 @@ SUB showKeybindPopup
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "Home 1/2/3x = Go To Start of Line/Page/Buffer"
   y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "End 1/2/3x  = Go To End of Line/Page/Buffer"
+  TEXT x%, y%, "End  1/2/3x = Go To End of Line/Page/Buffer"
   y% = y% + ROW_HEIGHT%
-  IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
-    TEXT x%, y%, "Tab/Shift-Tab = Indent/Unindent Line/Selection"
-  ELSE
-    TEXT x%, y%, "Tab/Ctrl-B  = Indent/Unindent Line/Selection"
-  ENDIF
+  TEXT x%, y%, "Ctrl-M      = Scroll current line to Center of Window"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Alt-M       = Scroll current line to Top of Window"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Tab/Shift-Tab = Indent/Unindent Line/Selection"
   y% = y% + ROW_HEIGHT%
   IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
     TEXT x%, y%, "Shift-Navigation Key = Start/Extend Selection"
@@ -2907,7 +2919,7 @@ SUB enterKeyHandler
   winSelectCol%(crsrActiveWidx%) = -1
   winSelectRow%(crsrActiveWidx%) = -1
 
-  IF winRedrawAction%(crsrActiveWidx%) <> FULL_REDRAW% THEN
+  IF (winRedrawAction%(crsrActiveWidx%) <> FULL_REDRAW%) AND (winRedrawAction%(crsrActiveWidx%) <> SCROLL_UP%) THEN
     crsrOff
     drawWinRow crsrActiveWidx%, winWinCrsrRow%(crsrActiveWidx%)-1, 0 
     winContentScrollDownStartRow% = winWinCrsrRow%(crsrActiveWidx%)
@@ -3615,6 +3627,10 @@ SUB unindentKeyHandler
 END SUB
 
 SUB cutKeyHandler
+  IF NOT selectMode%(crsrActiveWidx%) THEN
+    EXIT SUB
+  ENDIF
+
   promptMsg "Cutting...", 1
   copyAction
   registerForUndo UNDO_DELETE_SELECTION%
@@ -3688,6 +3704,10 @@ SUB copyAction
 END SUB
 
 SUB copyKeyHandler
+  IF NOT selectMode%(crsrActiveWidx%) THEN
+    EXIT SUB
+  ENDIF
+
   promptMsg "Copying...", 1
   copyAction
   promptMsg "Copy done.", 1
@@ -4610,6 +4630,25 @@ SUB selectAllKeyHandler
   winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
 END SUB
 
+'topNotCenter=0 means move to center, =1 means move to top.
+SUB repositionKeyHandler(topNotCenter%)
+  LOCAL targetWinRow%
+  
+  IF topNotCenter% THEN
+    targetWinRow% = 0 'Move to top
+  ELSE
+    targetWinRow% = winNumRows%(crsrActiveWidx%)\2 'Move to center
+  ENDIF
+  
+  LOCAL linesToScroll% = winWinCrsrRow%(crsrActiveWidx%)-targetWinRow%
+
+  IF winBufTopRow%(crsrActiveWidx%) + linesToScroll% < 0 THEN
+    linesToScroll% = -winBufTopRow%(crsrActiveWidx%)
+  ENDIF
+  scrollVdelta(crsrActiveWidx%, linesToScroll%)
+  winWinCrsrRow%(crsrActiveWidx%) = winWinCrsrRow%(crsrActiveWidx%) - linesToScroll%
+  winBufCrsrRow%(crsrActiveWidx%) = winBufTopRow%(crsrActiveWidx%) + winWinCrsrRow%(crsrActiveWidx%)
+END SUB
 '<-- End of Key Handler section
 
 '--> Keypress with modifiers and selection logic.
@@ -4618,7 +4657,11 @@ END SUB
 FUNCTION clrSelectionBeforeKey%(key%)
   SELECT CASE key%
     CASE CRSR_UP_KEY%, CRSR_DOWN_KEY%, CRSR_LEFT_KEY%, CRSR_RIGHT_KEY%, PGUP_KEY%, PGDOWN_KEY%, HOME_KEY%, END_KEY%
-      clrSelectionBeforeKey% = 1
+      IF (SERIAL_INPUT_COMPAT_MODE% = 1) AND selectionActive% THEN  
+        clrSelectionBeforeKey% = 0
+      ELSE
+        clrSelectionBeforeKey% = 1
+      ENDIF
     CASE ELSE
       clrSelectionBeforeKey% = 0
   END SELECT
@@ -4734,7 +4777,7 @@ END SUB
 'Key press dispatcher with support for selections and modifiers
 SUB handleKey pressedKey%
   STATIC nConsecHomePresses% = 0, nConsecEndPresses% = 0, nSelectConsecPresses% = 0
-  
+    
   LOCAL bIdx% = winBuf%(crsrActiveWidx%)
   
   'Console mode has its own key handler
@@ -4799,7 +4842,7 @@ SUB handleKey pressedKey%
   ELSE
     nConsecEndPresses% = 0
   ENDIF
-
+  
   SELECT CASE pressedKey%
     CASE CRSR_UP_KEY%, SELECT_CRSR_U_KEY%
       crsrUpKeyHandler
@@ -4892,6 +4935,10 @@ SUB handleKey pressedKey%
       resourceUtilKeyHandler
     CASE SELECT_ALL_KEY%
       selectAllKeyHandler
+    CASE MOVE_TO_CENTER_KEY%
+      repositionKeyHandler 0 '0=center
+    CASE MOVE_TO_TOP_KEY%
+      repositionKeyHandler 1 '1=top
     CASE ELSE
       pressedKey% = pressedKey% AND 255
       IF isPrintable%(pressedKey%) THEN
@@ -4962,3 +5009,6 @@ SUB checkKeyAndModifier
     ENDIF
   ENDIF
 END SUB
+
+
+                                                                              
