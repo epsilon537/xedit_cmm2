@@ -44,6 +44,8 @@ CONST BG_COLOR2% = base01% 'RGB(64, 64, 255)
 'CONST BG_COLOR% = RGB(0,0,128)
 'CONST BG_COLOR2% = RGB(64, 64, 255)
 
+CONST MAX_NUM_CMDLINE_ARGS% = 2
+
 CONST KEYB_REPEAT_FIRST% = 300
 CONST KEYB_REPEAT_REST% = 40
 
@@ -79,7 +81,7 @@ ENDIF
 
 FONT 1, 1
 
-CONST VERSION$ = "0.6"
+CONST VERSION$ = "0.7"
 
 IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   'Key code mode:
@@ -389,6 +391,8 @@ DIM bufFilename$(NUM_BUFFERS%-1)
 DIM bufIsModified%(NUM_BUFFERS%-1)
 DIM bufSavedCrsrCol%(NUM_BUFFERS%-1) 'Used to maintain cursor position when the buffer is not associated with a window.
 DIM bufSavedCrsrRow%(NUM_BUFFERS%-1)
+DIM bufSavedTopCol%(NUM_BUFFERS%-1)
+DIM bufSavedTopRow%(NUM_BUFFERS%-1)
 DIM bufSynHLEnabled%(NUM_BUFFERS%-1)
 DIM bufIsConsole%(NUM_BUFFERS%-1)
 
@@ -510,14 +514,14 @@ KEYWORD_LIST_DATA:
   DATA "OR","XOR","INV","INT","WRITE","SHOW","NOT","SKIP","LOADARRAY","SPACE","RGB"
   DATA "LEN","LEFT","RIGHT","EOF","MAX","MIN","COLOR","UCASE","LCASE","LCOMPARE","HIDE"
   DATA "SAFE", "MM", "INFO", "DEVICE", "ERRNO", "ERRMSG", "HRES", "VRES", "PEEK", "MOD"
-  DATA "INTEGER", "STRING", "FLOAT", "OFF", "OUTPUT", "RANDOM"
+  DATA "INTEGER", "STRING", "FLOAT", "OFF", "OUTPUT", "RANDOM", "REPLACE"
   DATA "INCLUDE", "TO", "AS", "LENGTH", "UNTIL","IR","LS"
   DATA "ABS", "ACOS", "ASC", "ASIN", "ATAN2", "ATN","BAUDRATE","BIN"
-  DATA "BIN2STR", "BOUND", "CINT", "CLASSIC", "COS","CWD"
+  DATA "BIN2STR", "BOUND", "CINT", "CLASSIC", "COS","CWD", "CAT"
   DATA "DATETIME", "DAY", "DEG", "DIR", "DISTANCE", "EPPOCH", "EVAL", "EXP"
   DATA "FIELD", "FIX", "FORMAT", "GETSCANLINE", "GPS", "HEX", "INKEY", "KEYDOWN"
   DATA "LGETBYTE", "LGETSTR", "LINSTR", "LLEN", "LOC", "LOF", "LOG", "NUNCHUK", "OCT"
-  DATA "PI", "PULSIN", "RAD", "RND", "SGN", "SIN","STR2BIN", "SQR", "STR", "TAB", "TAN"
+  DATA "PI", "PULSIN", "RAD", "RND", "SGN", "SIN","STR2BIN", "SQR", "STR", "TAB", "TAN", "POS"
   DATA "INC", "RESIZE", "TRANSPARENCY", "CONCAT", "SETBYTE", "endSentinel" 'Keep this at the end of the list. Do not delete.
    
 SUB scanCmdList
@@ -811,11 +815,20 @@ drawWindow 0
 
 SUB setupCtxt
   LOCAL dummy%, bIdx%
-  
-  IF MM.CMDLINE$ <> "" THEN
-    dummy% = checkAndLoad%(0, MM.CMDLINE$) 'File to edit can be passed in on command line.
+  LOCAL cmdLineArgs$(MAX_NUM_CMDLINE_ARGS%)
+  LOCAL nArgs%
+
+  parseCmdLine(MM.CMDLINE$, cmdLineArgs$(), nArgs%)
+
+  IF nArgs% > 0 THEN
+    dummy% = checkAndLoad%(0, cmdLineArgs$(0)) 'File to edit can be passed in on command line.
     drawWindow 0
-  ELSE      
+  ENDIF
+  IF nArgs% > 1 THEN
+    dummy% = checkAndLoad%(1, cmdLineArgs$(1))
+  ENDIF
+
+  IF nArgs%=0 THEN
     IF RESTORE_PREV_SESSION_CTXT% THEN
       restoreSessionCtxt  
       IF (bufFilename$(0) <> "") AND NOT bufIsConsole%(0) THEN
@@ -825,8 +838,7 @@ SUB setupCtxt
         dummy% = checkAndLoad%(1, bufFilename$(1))
       ENDIF
       
-      bIdx% = winBuf%(crsrActiveWidx%)            
-      gotoBufPos bufSavedCrsrRow%(bIdx%), bufSavedCrsrCol%(bIdx%), 0, 1
+      restoreBufPos
   
       drawWindow 0
     ENDIF
@@ -834,11 +846,15 @@ SUB setupCtxt
 END SUB
 setupCtxt
 
-settick CURSOR_BLINK_PERIOD%, blinkCursorInt, 1
+SETTICK CURSOR_BLINK_PERIOD%, blinkCursorInt, 1
 
 mainLoop
 
 EndOfProg:
+
+'Disable IRQ
+SETTICK 0, 0, 1
+
 IF RESTORE_PREV_SESSION_CTXT% THEN
   saveSessionCtxt
 ENDIF
@@ -915,6 +931,12 @@ SUB restoreSessionCtxt
     LINE INPUT #1, lin$
     bufSavedCrsrRow%(0) = VAL(lin$)
 
+    LINE INPUT #1, lin$  
+    bufSavedTopCol%(0) = VAL(lin$)
+    
+    LINE INPUT #1, lin$
+    bufSavedTopRow%(0) = VAL(lin$)
+
     LINE INPUT #1, lin$
     bufSynHLEnabled%(0) = VAL(lin$)
 
@@ -929,6 +951,12 @@ SUB restoreSessionCtxt
     
     LINE INPUT #1, lin$
     bufSavedCrsrRow%(1) = VAL(lin$)
+
+    LINE INPUT #1, lin$
+    bufSavedTopCol%(1) = VAL(lin$)
+    
+    LINE INPUT #1, lin$
+    bufSavedTopRow%(1) = VAL(lin$)
 
     LINE INPUT #1, lin$
     bufSynHLEnabled%(1) = VAL(lin$)
@@ -952,6 +980,8 @@ SUB saveSessionCtxt
   'Save active window's cursor position (the other one is already saved.
   bufSavedCrsrCol%(bIdx%) = winBufCrsrCol%(crsrActiveWidx%)
   bufSavedCrsrRow%(bIdx%) = winBufCrsrRow%(crsrActiveWidx%)
+  bufSavedTopCol%(bIdx%) = winBufTopCol%(crsrActiveWidx%)
+  bufSavedTopRow%(bIdx%) = winBufTopRow%(crsrActiveWidx%)
 
   OPEN CTXT_FILE_PATH$ FOR OUTPUT AS #1
   
@@ -959,12 +989,16 @@ SUB saveSessionCtxt
   PRINT #1, bufFilename$(0)
   PRINT #1, STR$(bufSavedCrsrCol%(0))
   PRINT #1, STR$(bufSavedCrsrRow%(0))
+  PRINT #1, STR$(bufSavedTopCol%(0))
+  PRINT #1, STR$(bufSavedTopRow%(0))  
   PRINT #1, STR$(bufSynHLEnabled%(0))
   PRINT #1, STR$(bufIsConsole%(0))
   
   PRINT #1, bufFilename$(1)
   PRINT #1, STR$(bufSavedCrsrCol%(1))
   PRINT #1, STR$(bufSavedCrsrRow%(1))
+  PRINT #1, STR$(bufSavedTopCol%(1))
+  PRINT #1, STR$(bufSavedTopRow%(1))  
   PRINT #1, STR$(bufSynHLEnabled%(1))
   PRINT #1, STR$(bufIsConsole%(1))
 
@@ -1197,6 +1231,35 @@ SUB showResUtilPopup
   COLOR FG_COLOR%, BG_COLOR%
 
   BLIT 0, 0, MM.HRES/2 - boxWidth%/2, MM.VRES/2 - boxHeight%/2, boxWidth%, boxHeight%, 3
+END SUB
+
+SUB parseCmdLine(cmdLine$, cmdLineArgs$(), nArgs%)
+  LOCAL curPos%=1, startPos%
+  LOCAL inWhiteSpace%=1
+  LOCAL curArg%=0
+  
+  DO WHILE (curPos%<=LEN(cmdLine$)) AND (curArg%<MAX_NUM_CMDLINE_ARGS%)
+    IF inWhiteSpace% THEN
+      IF MID$(cmdLine$, curPos%, 1) <> " " THEN
+        startPos% = curPos%
+        inWhiteSpace% = 0
+      ENDIF
+    ELSE
+      IF MID$(cmdLine$, curPos%, 1) = " " THEN
+        cmdLineArgs$(curArg%) = MID$(cmdLine$, startPos%, curPos%-startPos%)
+        curArg% = curArg% + 1
+        inWhiteSpace% = 1
+      ENDIF
+    ENDIF
+    curPos% = curPos%+1
+  LOOP
+  
+  IF (inWhiteSpace%=0) AND (curArg% < MAX_NUM_CMDLINE_ARGS%) THEN
+    cmdLineArgs$(curArg%) = MID$(cmdLine$, startPos%)
+    curArg% = curArg% + 1
+  ENDIF
+  
+  nArgs% = curArg%
 END SUB
 
 '--> Save current position of buffer in window and cursor in window so we can go back to it
@@ -1506,7 +1569,8 @@ SUB initBuffer(bIdx%)
   bufIsModified%(bIdx%) = 0
   bufSavedCrsrCol%(bIdx%) = 0
   bufSavedCrsrRow%(bIdx%) = 0
-  bufSynHLEnabled%(bIdx%) = DEFAULT_ENABLE_SYN_HL%
+  bufSavedTopCol%(bIdx%) = 0
+  bufSavedTopRow%(bIdx%) = 0  
   bufIsConsole%(bIdx%) = 0
   
   FOR ii%=0 TO MAX_NUM_ROWS%-1
@@ -1519,6 +1583,13 @@ SUB setupBuffer(bIdx%, numRows%, filename$, isConsole%)
   bufFilename$(bIdx%) = filename$
   bufIsConsole%(bIdx%) = isConsole%
   bufIsModified%(bIdx%) = 0
+  
+  LOCAL fileExt$ = UCASE$(RIGHT$(filename$,4))
+  IF (fileExt$=".INC") OR (fileExt$=".BAS") OR (fileExt$="") THEN
+    bufSynHLEnabled%(bIdx%) = DEFAULT_ENABLE_SYN_HL%
+  ELSE
+    bufSynHLEnabled%(bIdx%) = 0
+  ENDIF
 END SUB
 
 'Empty the keyboard input buffer
@@ -1576,7 +1647,7 @@ END FUNCTION
 FUNCTION promptForText$(txt$)
   LOCAL inputStr$
   TEXT 0, PROMPTY%, txt$
-  PRINT @(LEN(txt$)*COL_WIDTH%,PROMPTY%) "";:INPUT "", inputStr$
+  PRINT @(LEN(txt$)*COL_WIDTH%,PROMPTY%) "";:LINE INPUT "", inputStr$
   emptyInputBuffer
   TEXT 0, PROMPTY%, SPACE$(MM.HRES\COL_WIDTH%)
   promptForText$ = inputStr$  
@@ -2216,10 +2287,7 @@ SUB toggleScreenSplitKeyHandler
       
       'Temp switch to other window to restore cursor position.
       crsrActiveWidx% = NOT crsrActiveWidx%
-
-      bIdx% = winBuf%(crsrActiveWidx%)            
-      gotoBufPos bufSavedCrsrRow%(bIdx%), bufSavedCrsrCol%(bIdx%), 0, 1
-
+      restoreBufPos
       crsrActiveWidx% = NOT crsrActiveWidx%
       
       drawWindow 0: drawWindow 1
@@ -2242,8 +2310,7 @@ SUB toggleScreenSplitKeyHandler
 
       'Temp switch to other window to restore cursor position.
       crsrActiveWidx% = NOT crsrActiveWidx%
-      bIdx% = winBuf%(crsrActiveWidx%)            
-      gotoBufPos bufSavedCrsrRow%(bIdx%), bufSavedCrsrCol%(bIdx%), 0, 1
+      restoreBufPos
       crsrActiveWidx% = NOT crsrActiveWidx%
       
       drawWindow 0: drawWindow 1
@@ -2285,12 +2352,14 @@ SUB toggleBufferKeyHandler
   'Save current buffer's cursor position
   bufSavedCrsrCol%(bIdx%) = winBufCrsrCol%(crsrActiveWidx%)
   bufSavedCrsrRow%(bIdx%) = winBufCrsrRow%(crsrActiveWidx%)
+  bufSavedTopCol%(bIdx%) = winBufTopCol%(crsrActiveWidx%)
+  bufSavedTopRow%(bIdx%) = winBufTopRow%(crsrActiveWidx%)
 
   bIdx% = NOT bIdx%
   winBuf%(crsrActiveWidx%) = bIdx%
 
   'Restore other buffer's cursor position
-  gotoBufPos bufSavedCrsrRow%(bIdx%), bufSavedCrsrCol%(bIdx%), 1, 1
+  restoreBufPos
 END SUB
 
 SUB loadIntoCurrentBufKeyHandler
@@ -3836,6 +3905,24 @@ SUB pasteKeyHandler
   promptMsg "Paste done.", 1
 END SUB
 
+SUB restoreBufPos
+  LOCAL bIdx% = winBuf%(crsrActiveWidx%)
+
+  winBufCrsrRow%(crsrActiveWidx%) = bufSavedCrsrRow%(bIdx%)
+  winBufCrsrCol%(crsrActiveWidx%) = bufSavedCrsrCol%(bIdx%)
+  
+  LOCAL topRowLimit% = winBufCrsrRow%(crsrActiveWidx%)-winNumRows%(crsrActiveWidx%)+1  
+  LOCAL topColLimit% = winBufCrsrCol%(crsrActiveWidx%)-winNumCols%(crsrActiveWidx%)+1  
+  
+  winBufTopRow%(crsrActiveWidx%) = MAX(bufSavedTopRow%(bIdx%), topRowLimit%)
+  winBufTopCol%(crsrActiveWidx%) = MAX(bufSavedTopCol%(bIdx%), topColLimit%)
+
+  winWinCrsrRow%(crsrActiveWidx%) = winBufCrsrRow%(crsrActiveWidx%) - winBufTopRow%(crsrActiveWidx%)
+  winWinCrsrCol%(crsrActiveWidx%) = winBufCrsrCol%(crsrActiveWidx%) - winBufTopCol%(crsrActiveWidx%)
+
+  winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
+END SUB
+
 'Sticky cursor = 1 avoids moving the cursor and scrolls the page instead.
 'Sticky cursor = 0 avoids scrolling the page and moves the cursor instead.
 SUB gotoBufPos(bufRow%, bufCol%, stickyCursor%, resetCrsrTargetCol%)
@@ -3991,6 +4078,8 @@ SUB findStrToFind(direction%, skipCurrent%)
             col% = linLen%-strToFindLen%
           ENDIF
         ENDIF
+
+        drawSlider crsrActiveWidx%
         
         'There may be multiple hits on the same row, so we have to loop over columns
         'until the end of the line is reached.
@@ -4144,6 +4233,8 @@ SUB replaceKeyHandler
 
       'If there are no matches on this line, move on to next/prev row. Else scan through hits.
       IF INSTR(lin$, strToReplace$) THEN
+        drawSlider crsrActiveWidx%
+        
         'There may be multiple hits on the same row, so we have to loop over columns
         'until the end of the line is reached.
         DO WHILE (col%>=0) AND (col% < linLen%)
@@ -4463,7 +4554,17 @@ END SUB
 SUB saveAsKeyHandler
   LOCAL bIdx% = winBuf%(crsrActiveWidx%)
   bufFilename$(bIdx%) = promptForText$("Save Buffer as: ")
+  
+  LOCAL fileExt$ = UCASE$(RIGHT$(bufFilename$(bIdx%),4))
+  IF (fileExt$=".INC") OR (fileExt$=".BAS") OR (fileExt$="") THEN
+    bufSynHLEnabled%(bIdx%) = DEFAULT_ENABLE_SYN_HL%
+  ELSE
+    bufSynHLEnabled%(bIdx%) = 0
+  ENDIF
+
   saveFile
+  
+  winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
 END SUB
 
 SUB paasei
@@ -5009,6 +5110,3 @@ SUB checkKeyAndModifier
     ENDIF
   ENDIF
 END SUB
-
-
-                                                                              

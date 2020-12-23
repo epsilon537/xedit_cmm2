@@ -1,12 +1,21 @@
 XEdit Text Editor for Color Maximite 2 by Epsilon
 -------------------------------------------------
-Current Version: 0.6
+Current Version: 0.7
 
 ChangeLog
 ---------
+0.7:
+- Removed limitation: Text entered on find prompt can now include quotes and commas.
+- Added more keywords for syntax highlighting.
+- Fixed error that sometimes occurs when exiting, preventing context from being saved.
+- Position-in-buffer indicator now updates when searching.
+- Disable syntax highlighting if buffer is not MMBasic.
+- Improved cursor position restore when toggling between buffers (F4).
+- Accept two files to open on command line.
+
 0.6:
 - Critical Bug Fix: Pressing enter twice on last line in window triggered an incorrect page
-  redraw action so it would look as if the line disappeared.
+  redraw action (scroll down instead of up) so it would look as if the line disappeared.
 - Critical Bug Fix: Ctrl-X (Cut) without active selection triggers program abort.
 - Bug Fix: In SERIAL_INPUT_COMPAT_MODE, toggle selection (Esc) was broken in 0.5.
 - In SERIAL_INPUT_COMPAT_MODE replaced Ctrl-B with Shift-Tab. This key binding only works
@@ -14,7 +23,7 @@ ChangeLog
 - Added more keywords for syntax highlighting.
 - New key binding: Ctrl-M = Scroll current line to Center of Window
 - New key binding: Alt-M  = Scroll current line to Top of Window
-- V5.06 FW compatibility fixes.
+- V5.06 FW compatilibity fixes.
   
 0.5:
 - Improved horizontal scrolling speed.
@@ -106,7 +115,6 @@ To Dos
 ------
 - Add support for vegipete's FileDialog.
 - Add case sensitive search/replace keybindings.
-- Smart, escapable line input, allowing entering commas and double quotes on prompt. 
 - Support copy-to-clipboard from console screen.
 
 Key Bindings
@@ -166,10 +174,5 @@ Limitations
 - Max. 14000 lines across all buffers (including clipboard and undo buffer).
 - Max. 2 windows
 - Max. 2 buffers
-- Text entered on find prompt can't include double quotes or commas. Find selection can
-includes double quotes and commas however.
 - Edit and Clipboard operations are not supported on buffer in show console mode.
 - No undo for replace operations.
-
-
-                                                                                            
