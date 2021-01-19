@@ -1,9 +1,13 @@
 XEdit Text Editor for Color Maximite 2 by Epsilon
 -------------------------------------------------
-Current Version: 0.7
+Current Version: 0.8
 
 ChangeLog
 ---------
+0.8
+- Some color tweaks.
+- Added support for vegipete's FileDialog to load and save files.
+
 0.7:
 - Removed limitation: Text entered on find prompt can now include quotes and commas.
 - Added more keywords for syntax highlighting.
@@ -113,7 +117,6 @@ insert/overwrite mode, goto line.
 
 To Dos
 ------
-- Add support for vegipete's FileDialog.
 - Add case sensitive search/replace keybindings.
 - Support copy-to-clipboard from console screen.
 
@@ -176,3 +179,6 @@ Limitations
 - Max. 2 buffers
 - Edit and Clipboard operations are not supported on buffer in show console mode.
 - No undo for replace operations.
+
+
+                                                   
