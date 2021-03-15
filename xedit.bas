@@ -55,7 +55,7 @@ CONST DEFAULT_ENABLE_SYN_HL% = 1
 CONST SEARCH_IS_CASE_SENSITIVE% = 0
 CONST TAB_WIDTH% = 2
 'Set to 1 to try and restore previous context (open files and cursor positions) when open XEdit.
-CONST RESTORE_PREV_SESSION_CTXT% = 1
+CONST RESTORE_PREV_SESSION_CTXT% = 0
 CONST CTXT_FILE_PATH$ = "\.xedit.ctxt"
 
 'Disable those pesky confirmation prompts
@@ -66,7 +66,7 @@ CONST DISABLE_CONFIRMATION_PROMPTS% = 0
 CONST SERIAL_INPUT_COMPAT_MODE% = 0
 
 'Set to the number of backup copies you would like to maintain when saving a file.
-CONST NUM_BACKUP_FILES% = 1
+CONST NUM_BACKUP_FILES% = 0
 
 'Set to 0 to open and save files through prompt instead of a File Dialog box.
 CONST ENABLE_FILE_DIALOG_BOX% = 1
@@ -84,7 +84,7 @@ ENDIF
 
 FONT 1, 1
 
-CONST VERSION$ = "0.8"
+CONST VERSION$ = "0.9"
 
 IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   'Key code mode:
@@ -128,6 +128,7 @@ IF SERIAL_INPUT_COMPAT_MODE% = 0 THEN
   CONST KEY_CTRL_O% = 271
   CONST KEY_CTRL_P% = 272
   CONST KEY_CTRL_R% = 274
+  CONST KEY_CTRL_S% = 275
   CONST KEY_CTRL_V% = 278
   CONST KEY_CTRL_X% = 280
   CONST KEY_CTRL_Y% = 281
@@ -275,6 +276,7 @@ CONST FIND_KEY% = KEY_CTRL_F%
 CONST FIND_REV_KEY% = KEY_ALT_F%
 CONST FIND_NEXT_KEY% = KEY_CTRL_N%
 CONST FIND_PREV_KEY% = KEY_ALT_N%
+CONST FIND_ACROSS_FILES_KEY% = KEY_CTRL_S%
 CONST REPLACE_KEY% = KEY_CTRL_R%
 CONST UNDO_KEY% = KEY_CTRL_Z%
 CONST SAVE_KEY% = KEY_F2%
@@ -366,6 +368,8 @@ CONST SCROLL_LEFT% = 4
 CONST SCROLL_RIGHT% = 5
 '<--
 
+CONST XFIND_MAX_NUM_ROWS% = 2000
+
 '===================
 ' required setup for VegiPete's FileDialog box
 CONST DIRCOUNT% = 50   ' max number of sub-directories
@@ -378,6 +382,15 @@ dim d_lines%
 dim d_x%, d_y%, d_back%, d_frame%
 
 ' end of setup for funtion
+'===================
+
+'===================
+' xFind globals
+DIM xFindBufRow%
+DIM xFindBIdx%
+DIM recursionLevel% = 0
+DIM startDir$ = CWD$
+DIM matchCounter%
 '===================
 
 DIM winContentScrollDownStartRow%, winContentScrollUpStartRow%
@@ -532,10 +545,10 @@ KEYWORD_LIST_DATA:
   DATA "LEN","LEFT","RIGHT","EOF","MAX","MIN","COLOR","UCASE","LCASE","LCOMPARE","HIDE"
   DATA "SAFE", "MM", "INFO", "DEVICE", "ERRNO", "ERRMSG", "HRES", "VRES", "PEEK", "MOD"
   DATA "INTEGER", "STRING", "FLOAT", "OFF", "OUTPUT", "RANDOM", "REPLACE"
-  DATA "INCLUDE", "TO", "AS", "LENGTH", "UNTIL","IR","LS"
-  DATA "ABS", "ACOS", "ASC", "ASIN", "ATAN2", "ATN","BAUDRATE","BIN"
+  DATA "INCLUDE", "TO", "AS", "LENGTH", "UNTIL","IR","LS", "STEP", "STOP"
+  DATA "ABS", "ACOS", "ASC", "ASIN", "ATAN2", "ATN","BAUDRATE","BIN", "MM.INFO"
   DATA "BIN2STR", "BOUND", "CINT", "CLASSIC", "COS","CWD", "CAT", "#INCLUDE"
-  DATA "DATETIME", "DAY", "DEG", "DIR", "DISTANCE", "EPPOCH", "EVAL", "EXP"
+  DATA "DATETIME", "DAY", "DEG", "DIR", "DISTANCE", "EPPOCH", "EVAL", "EXP", "CALL"
   DATA "FIELD", "FIX", "FORMAT", "GETSCANLINE", "GPS", "HEX", "INKEY", "KEYDOWN"
   DATA "LGETBYTE", "LGETSTR", "LINSTR", "LLEN", "LOC", "LOF", "LOG", "NUNCHUK", "OCT"
   DATA "PI", "PULSIN", "RAD", "RND", "SGN", "SIN","STR2BIN", "SQR", "STR", "TAB", "TAN", "POS"
@@ -1028,7 +1041,7 @@ END SUB
 'Popup is prepared on a separate page in a Box, then shown on page 0 using blit.
 SUB showKeybindPopup                                                                
   LOCAL longestStringLen% = LEN("Key Bindings (Ref. Key Bindings section in XEdit.bas to modify):")
-  LOCAL numLines% = 39
+  LOCAL numLines% = 40
   LOCAL boxWidth% = (longestStringLen%+4)*COL_WIDTH%
   LOCAL boxHeight% = (numLines%+4)*ROW_HEIGHT%
 
@@ -1070,6 +1083,8 @@ SUB showKeybindPopup
   TEXT x%, y%, "Ctrl/Alt-F  = Forward/Reverse Find Prompt or Selection"
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "Ctrl/Alt-N  = Find Next/Previous"
+  y% = y% + ROW_HEIGHT%
+  TEXT x%, y%, "Ctrl-S      = Find Across Files (xFind)"
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "Ctrl-R      = Replace Prompt or Selection"
   y% = y% + ROW_HEIGHT%
@@ -1160,13 +1175,13 @@ SUB showUserCfgPopup
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "TAB_WIDTH%=<Num.>                  Default=2"
   y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "RESTORE_PREV_SESSION_CTXT%=0/1     Default=1"
+  TEXT x%, y%, "RESTORE_PREV_SESSION_CTXT%=0/1     Default=0"
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "FG/KEYWORD/STRING/COMMENT/BG_COLOR%"
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "DISABLE_CONFIRMATION_PROMPTS%=0/1  Default=0"
   y% = y% + ROW_HEIGHT%
-  TEXT x%, y%, "NUM_BACKUP_FILES%=<Num.>           Default=1"
+  TEXT x%, y%, "NUM_BACKUP_FILES%=<Num.>           Default=0"
   y% = y% + ROW_HEIGHT%
   TEXT x%, y%, "ENABLE_FILE_DIALOG_BOX%=0/1        Default=1"
   y% = y% + ROW_HEIGHT%
@@ -1891,7 +1906,7 @@ SUB drawWinRow(wIdx%, winRow%, checkOtherWin%)
 
   selectionBoundaries(wIdx%, selStartRow%, selStartCol%, selEndRow%, selEndCol%)
 
-  'Is a selection active on this line?
+  'Is a selection active on this line?                         
   IF (bufRow% >= selStartRow%) AND (bufRow% <= selEndRow%) THEN 'Selection active on this line
     LOCAL strToPrint$ = MID$(theStrings$(linePtr%), winBufTopCol%(wIdx%)+1, winNumCols%(wIdx%))
 
@@ -1901,7 +1916,7 @@ SUB drawWinRow(wIdx%, winRow%, checkOtherWin%)
     IF (selStartRow% = selEndRow%) THEN '1. Selection starts and ends on current line
       selStartCol% = bufToWinCol%(wIdx%, selStartCol%)
       selEndCol% = bufToWinCol%(wIdx%, selEndCol%)
-      IF selEndCol% > selStartCol% THEN 
+      IF selEndCol% > selStartCol% THEN                                           
         TEXT winColToXpos%(wIdx%,selStartCol%), y%, MID$(strToPrint$, selStartCol%+1, selEndCol% - selStartCol%),,,, FG_COLOR%, BG_COLOR2%
       ENDIF
     ELSEIF (bufRow% = selStartRow%) THEN '2. Selection starts on current line, ends on a different line.
@@ -2502,26 +2517,22 @@ SUB crsrRightImp(draw%) 'Set draw% to 0 to skip drawing.
   IF (newBufCrsrRow% > oldBufCrsrRow%) AND (oldWinCrsrRow% = newWinCrsrRow%) THEN
     scrollVdelta crsrActiveWidx%, 1
   ENDIF
+
   IF (newBufCrsrCol% > oldBufCrsrCol%) AND (oldWinCrsrCol% = newWinCrsrCol%) THEN
     scrollHdelta crsrActiveWidx%, 1
   ELSEIF (newWinCrsrCol% < oldWinCrsrCol%) AND (oldBufCrsrCol% >= winNumCols%(crsrActiveWidx%)) THEN
     scrollHoffset crsrActiveWidx%, 0
   ENDIF
 
-  IF NOT draw% THEN
-    EXIT SUB
-  ENDIF
-  
-  IF selectMode%(crsrActiveWidx%) THEN
+  IF draw% AND selectMode%(crsrActiveWidx%) THEN
     crsrOff
 
-    SELECT CASE winRedrawAction%(crsrActiveWidx%)
-      CASE SCROLL_UP%, SCROLL_DOWN%
-        winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
-    END SELECT
-    
-    drawWinRow crsrActiveWidx%, oldWinCrsrRow%, 1
-    drawWinRow crsrActiveWidx%, newWinCrsrRow%, 1
+    IF winRedrawAction%(crsrActiveWidx%) <> NO_REDRAW%  THEN
+      winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
+    ELSE
+      drawWinRow crsrActiveWidx%, oldWinCrsrRow%, 1
+      drawWinRow crsrActiveWidx%, newWinCrsrRow%, 1
+    ENDIF
   ENDIF
 END SUB
 
@@ -2583,20 +2594,16 @@ SUB crsrLeftImp draw% 'Set to 0 to skip drawing
   ELSEIF (newWinCrsrCol% > oldWinCrsrCol%) AND (newBufCrsrCol% >= winNumCols%(crsrActiveWidx%)) THEN
     scrollHdelta crsrActiveWidx%, newBufCrsrCol% - (winNumCols%(crsrActiveWidx%) - 1)
   ENDIF
-
-  IF NOT draw% THEN
-    EXIT SUB
-  ENDIF
-
-  IF selectMode%(crsrActiveWidx%) THEN
-    SELECT CASE winRedrawAction%(crsrActiveWidx%)
-      CASE SCROLL_UP%, SCROLL_DOWN%
-        winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
-    END SELECT
-
+  
+  IF draw% AND selectMode%(crsrActiveWidx%) THEN
     crsrOff
-    drawWinRow crsrActiveWidx%, oldWinCrsrRow%, 1
-    drawWinRow crsrActiveWidx%, newWinCrsrRow%, 1
+
+    IF winRedrawAction%(crsrActiveWidx%) <> NO_REDRAW%  THEN
+      winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
+    ELSE
+      drawWinRow crsrActiveWidx%, oldWinCrsrRow%, 1
+      drawWinRow crsrActiveWidx%, newWinCrsrRow%, 1    
+    ENDIF
   ENDIF
 END SUB
 
@@ -3396,6 +3403,11 @@ FUNCTION deleteSelection%()
   linLen% = LEN(toLin$)
 
   LOCAL l$ = LEFT$(fromLin$, fromCol%)
+  
+  IF linLen% - toCol% - 1 < 0 THEN
+    Error "Invalid num. characters: "+STR$(linLen%)+" "+STR$(toCol%)
+  ENDIF
+  
   LOCAL r$ = RIGHT$(toLin$, linLen% - toCol% - 1)
   
   IF LEN(l$) + LEN(r$) > 255 THEN
@@ -4179,6 +4191,57 @@ SUB findStrToFind(direction%, skipCurrent%)
   LOOP
 END SUB
 
+SUB findAcrossFiles(bIdx%)
+
+  LOCAL strToFind$ = promptForText$("xFind String: ")
+  
+  IF strToFind$ = "" THEN
+    EXIT SUB
+  ENDIF
+  
+  LOCAL fspec$ = promptForText$("File Spec (Optional): ")  
+
+  LOCAL ii%
+  FOR ii%=0 TO bufNumRows%(bIdx%)-1
+    freeLine bufLinePtrs%(ii%, bIdx%)
+  NEXT ii%
+
+  bufSynHLEnabled%(bIdx%) = 0
+
+  promptMsg "Searching...", 1
+  xFind(bIdx%, strToFind$, fspec$)
+  promptMsg "Done.", 1
+  
+  bufIsModified%(bIdx%) = 0
+  resetUndo 0  
+END SUB
+
+SUB findAcrossFilesKeyHandler
+  LOCAL bIdx% = winBuf%(crsrActiveWidx%)
+  
+  IF bufIsModified%(bIdx%) AND NOT DISABLE_CONFIRMATION_PROMPTS% THEN
+    LOCAL yesNo$ = promptForAnyKey$("You have unsaved changes. Discard the changes? (Y/N)")
+    IF UCASE$(yesNo$) <> "Y" THEN
+      EXIT SUB
+     ENDIF
+  ENDIF
+  
+  setupBuffer bIdx%, XFIND_MAX_NUM_ROWS%, "(xFind)", 0
+    
+  winBufCrsrCol%(crsrActiveWidx%) = 0
+  winBufCrsrRow%(crsrActiveWidx%) = 0
+  winWinCrsrCol%(crsrActiveWidx%) = 0
+  winWinCrsrRow%(crsrActiveWidx%) = 0
+
+  findAcrossFiles winBuf%(crsrActiveWidx%)
+    
+  winRedrawAction%(crsrActiveWidx%) = FULL_REDRAW%
+  IF winBuf%(0) = winBuf%(1) THEN 'If the other window looks into the same buffer, reset that one too.
+    resetWindow NOT crsrActiveWidx%
+    winRedrawAction%(NOT crsrActiveWidx%) = FULL_REDRAW%
+  ENDIF  
+END SUB
+
 SUB replaceKeyHandler
   LOCAL bIdx% = winBuf%(crsrActiveWidx%), firstPass%=1
   LOCAL strToReplace$ = "", replaceWith$ = ""
@@ -4438,6 +4501,8 @@ SUB undoRegisterForUndo
   IF undoIdx% < 0 THEN
     undoIdx% = MAX_NUM_UNDOS% - 1
   ENDIF
+  'Hack: boost key count to make sure pending undo records are aborted.
+  keyCounter% = keyCounter% + 2
 END SUB
 
 'A dispatcher for register for undo actions, with support for adding onto an
@@ -4817,7 +4882,7 @@ FUNCTION clrSelectionAfterKey%(key%)
   ENDIF
 
   SELECT CASE key%
-    CASE INDENT_KEY%, UNINDENT_KEY%, COPY_KEY%, UNDO_KEY%, SELECT_ALL_KEY%
+    CASE INDENT_KEY%, UNINDENT_KEY%, UNDO_KEY%, SELECT_ALL_KEY% ', COPY_KEY% was here
       clrSelectionAfterKey% = 0
     CASE ELSE
       clrSelectionAfterKey% = 1
@@ -5047,6 +5112,8 @@ SUB handleKey pressedKey%
       findNextKeyHandler
     CASE FIND_PREV_KEY%
       findPrevKeyHandler    
+    CASE FIND_ACROSS_FILES_KEY%
+      findAcrossFilesKeyHandler
     CASE REPLACE_KEY%
       replaceKeyHandler
     CASE UNDO_KEY%
@@ -5649,4 +5716,166 @@ sub ListDir(first%, nlines%, hilite%)
 end sub
 '*****************************************************************
 
-                                                                                
+'*****************************************************************
+'xFind integration:
+'*****************************************************************
+SUB xFind(bIdx%, strToSearch$, fspec$)
+  LOCAL ok%
+  
+  xFindBufRow% = 0
+  xFindBIdx% = bIdx%
+  matchCounter% = 0
+  
+  ok% = wrBufLine%(bIdx%, xFindBufRow%, "Searching for: "+strToSearch$)
+  INC xFindBufRow%
+  ok% = wrBufLine%(bIdx%, xFindBufRow%, "In: "+fspec$)
+  INC xFindBufRow%
+
+  'We can't just flag a request for redraw here because we're not returning
+  'to the mainloop (yet).
+  drawWinContents crsrActiveWidx%
+  drawWinHeader crsrActiveWidx%
+
+  'File spec or directory given?
+  LOCAL fileToScan$ = DIR$(fspec$, FILE)
+
+  IF fileToScan$<>"" THEN
+    'If a subdirectory is specified, cd into there first
+    LOCAL bd$=baseDir$(fspec$)
+    IF bd$<>"" THEN
+      CHDIR bd$
+    ENDIF
+    
+    DO WHILE fileToScan$ <> ""
+      scanFile strToSearch$, fileToScan$
+      fileToScan$ = DIR$()
+    LOOP
+  ELSEIF (fspec$=".") OR (DIR$(fspec$, DIR) <> "") THEN
+    scanDir(strToSearch$, fspec$)
+  ENDIF
+
+  ok% = wrBufLine%(xFindBIdx%, xFindBufRow%, "Number of matches: "+STR$(matchCounter%))
+  INC xFindBufRow%
+  ok% = wrBufLine%(xFindBIdx%, xFindBufRow%, "Done.")
+  INC xFindBufRow%
+
+  CHDIR startDir$
+END SUB
+
+'This function starts an iteration over all sub directories in the current directory.
+FUNCTION listDirs$()
+  'It can be so easy...
+  listDirs$ = DIR$("*", DIR)
+END FUNCTION
+
+'This function starts an iteration over all files in the current directory.
+FUNCTION listFiles$()
+  listFiles$ = DIR$("*.*", FILE)
+END FUNCTION
+
+'Extract the base directory portion of a filespec. E.g df/*.INC -> df
+FUNCTION baseDir$(fspec$)
+  LOCAL dividerPos%=0, prevDividerPos%
+  
+  baseDir$=""
+  
+  DO
+    prevDividerPos% = dividerPos%
+    dividerPos% = INSTR(dividerPos%+1, fspec$, "/")
+    IF dividerPos%=0 THEN
+      dividerPos% = INSTR(dividerPos%+1, fspec$, "\")
+    ENDIF
+  LOOP UNTIL dividerPos%=0
+  
+  IF prevDividerPos%<>0 THEN
+    baseDir$ = (LEFT$(fspec$, prevDividerPos%))
+  ENDIF
+END FUNCTION
+
+SUB scanFile(strToSearch$, filename$)
+  'PRINT SPACE$(recursionLevel%*2) "Processing file " filename$
+  
+  OPEN filename$ FOR INPUT AS #1
+
+  LOCAL lin$
+  LOCAL lineNbr%=1
+  LOCAL k$
+  LOCAL ok%
+  
+  'Contents
+  DO WHILE NOT EOF(#1)
+    ON ERROR SKIP 1
+    LINE INPUT #1, lin$
+    IF MM.ERRNO = 0 THEN
+      IF INSTR(UCASE$(lin$), UCASE$(strToSearch$)) THEN
+        k$ = CWD$ + "/" + filename$ + " " + STR$(lineNbr%) + ": " + lin$
+        ok% = wrBufLine%(xFindBIdx%, xFindBufRow%, k$)
+        INC xFindBufRow%
+        INC matchCounter%
+        
+        'We can't just flag a request for redraw here because we're not returning
+        'to the mainloop (yet).
+        drawWinContents crsrActiveWidx%
+        drawWinHeader crsrActiveWidx%
+      ENDIF
+    ENDIF
+    ON ERROR CLEAR
+    INC lineNbr%
+  LOOP
+
+  CLOSE #1
+END SUB
+
+'This subroutine processes the contents of given directory
+SUB scanDir(strToSearch$, dirToProcess$)
+  recursionLevel% = recursionLevel% + 1
+
+  LOCAL dirToProcess_l$ = dirToProcess$
+
+  CHDIR dirToProcess_l$
+
+  'Process the files
+  LOCAL fileToProcess$ = listFiles$()
+
+  DO WHILE fileToProcess$ <> ""
+    scanFile strToSearch$, fileToProcess$
+    fileToProcess$ = DIR$()
+  LOOP
+
+  'Process the subdirs  
+  LOCAL subDir$ = listDirs$()
+
+  'DIR$/nextDir$ can't handle recursion in this while loop so we have to build a subDir list  
+  LOCAL numSubDirs% = 0
+
+  'First calculate how many subdirs there are in this directory
+  DO WHILE subDir$ <> ""
+    numSubDirs% = numSubDirs% + 1
+    subDir$ = DIR$()
+  LOOP
+
+  IF numSubDirs% >= 1 THEN
+    'Note: The size of this array is too big by 1 entry
+    LOCAL subDirList$(numSubDirs%)
+
+    subDir$ = listDirs$()
+    LOCAL listIdx% = 0
+
+    DO WHILE subDir$ <> ""
+      subDirList$(listIdx%) = subDir$
+      subDir$ = DIR$()
+      listIdx% = listIdx% + 1
+    LOOP  
+
+    'Now we recurse. For some reason this doesn't work with a while loop, 
+    'but with a for loop it works just fine.
+    FOR listIdx%=0 TO numSubDirs%-1
+      scanDir strToSearch$, subDirList$(listIdx%)
+    NEXT listIdx%
+  ENDIF
+
+  CHDIR ".."
+  recursionLevel% = recursionLevel% - 1
+END SUB
+
+                  

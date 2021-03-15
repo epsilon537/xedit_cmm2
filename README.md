@@ -1,11 +1,19 @@
 XEdit Text Editor for Color Maximite 2 by Epsilon
 -------------------------------------------------
-Current Version: 0.8
+Current Version: 0.9
 
 ChangeLog
 ---------
+0.9
+- Integrated xFind find-across-files functionality, bound to Ctrl-S.
+- Bug fix: Selection not cleared on copy action.
+- Bug fix: Horizontal scrolling with active selection not displayed correctly.
+- Changed some defaults: NUM_BACKUP_FILES% defaults to 0. RESTORE_PREV_SESSION_CTXT% defaults to 0.
+- Buf fix: Fixed crash when trying to join two lines with a combined length > 255.
+- Added more syntax highlighting keywords.
+
 0.8
-- Some color tweaks.
+- Some color tweaks
 - Added support for vegipete's FileDialog to load and save files.
 
 0.7:
@@ -119,6 +127,8 @@ To Dos
 ------
 - Add case sensitive search/replace keybindings.
 - Support copy-to-clipboard from console screen.
+- Check if user added quotes around filename on command line. Remove them if he did.
+- Saw a case once where vertical scrolling led to the bottom row being displayed twice. Need to reproduce and investigate.
 
 Key Bindings
 ------------
@@ -180,5 +190,4 @@ Limitations
 - Edit and Clipboard operations are not supported on buffer in show console mode.
 - No undo for replace operations.
 
-
-                                                   
+                                               
