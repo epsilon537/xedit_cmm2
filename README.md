@@ -18,6 +18,9 @@ ChangeLog
 - Added support for user config and keybindings that can persist across version updates. Copy
 keybinding.default.inc to keybinding.user.inc, then make your tweaks in keybinding.user.inc as
 you see fit, and you're good to go. Same with settings.user.inc.
+- Included a self-extracting archive: xedit.mar.bas so you don't have to transfer all files in
+the directory separately to your CMM2. Just transfer xedit.mar.bas and execute it to have it
+unpack itself into a xedit/ directory.
 
 0.9
 - Integrated xFind find-across-files functionality, bound to Ctrl-S.
