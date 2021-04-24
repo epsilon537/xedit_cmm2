@@ -1,9 +1,24 @@
 XEdit Text Editor for Color Maximite 2 by Epsilon
 -------------------------------------------------
-Current Version: 0.9
+Current Version: 0.10
 
 ChangeLog
 ---------
+0.10
+- Find-across-files integration fixes. Find-across-files in 0.9 can lead to program crashes.
+- Find-across-files with empty filespec now correctly search current working dir + subdirs.
+- Fixed program abort that happened when providing empty name is Save File Dialogue box.
+- Added Current Working Directory to footer.
+- Support selection based xFind.
+- Checks and aborts loading of file if file has too-long lines.
+- Added more keywords for syntax highlighting.
+- Added check if user added quotes around filename on command line. Removed them if he did.
+- Split xedit.bas into multiple files. Each file is now editable again using the built-in editor,
+  a good citizenship requirement :-)
+- Added support for user config and keybindings that can persist across version updates. Copy
+keybinding.default.inc to keybinding.user.inc, then make your tweaks in keybinding.user.inc as
+you see fit, and you're good to go. Same with settings.user.inc.
+
 0.9
 - Integrated xFind find-across-files functionality, bound to Ctrl-S.
 - Bug fix: Selection not cleared on copy action.
@@ -127,8 +142,11 @@ To Dos
 ------
 - Add case sensitive search/replace keybindings.
 - Support copy-to-clipboard from console screen.
-- Check if user added quotes around filename on command line. Remove them if he did.
 - Saw a case once where vertical scrolling led to the bottom row being displayed twice. Need to reproduce and investigate.
+- SaveFileDialog can't be aborted when entering filename already started.
+- BackSpace in SaveFileDialog can go outside of box. Pressing enter at that point leads to
+  program abort.
+- Smarter indentation handling.
 
 Key Bindings
 ------------
@@ -190,4 +208,3 @@ Limitations
 - Edit and Clipboard operations are not supported on buffer in show console mode.
 - No undo for replace operations.
 
-                                               
